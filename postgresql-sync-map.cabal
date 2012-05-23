@@ -1,0 +1,22 @@
+name:           postgresql-sync-map
+version:        0.1.0
+synopsis:       Synchronizing postgresql row and key-value container
+homepage:       http://github.com/mvoidex/postgresql-sync-map
+author:         Alexandr `voidex` Ruchkin
+license:        BSD3
+cabal-version:  >= 1.10
+build-type:     Simple
+
+library
+    hs-source-dirs: src
+    default-language: Haskell2010
+    build-depends:
+        base                  >= 4 && < 5,
+        containers            >= 0.4 && < 0.5,
+        bytestring            >= 0.9 && < 1.0,
+        postgresql-simple     >= 0.1 && < 0.2
+    exposed-modules:
+        Database.PostgreSQL.Sync
+        Database.PostgreSQL.Sync.Types
+    other-modules:
+        Test
