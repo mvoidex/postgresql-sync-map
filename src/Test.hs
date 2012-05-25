@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Test (
-    test
+    test, testMap
     ) where
 
 import Data.ByteString (ByteString)
@@ -10,11 +10,13 @@ import qualified Data.Map as M
 import Database.PostgreSQL.Sync
 
 test :: Sync
-test = sync [
+test = sync "test" "id" "garbage" [
     field "x"    "xrow"    int,
     field "name" "namerow" string]
 
-testMap :: M.Map ByteString ByteString
+testMap :: SyncMap
 testMap = M.fromList [
     ("x", "123"),
-    ("name", "Vasya")]
+    ("name", "Vasya"),
+    ("blah", "foo"),
+    ("quux", "lala")]
