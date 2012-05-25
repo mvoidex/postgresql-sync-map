@@ -7,30 +7,26 @@ Declare fields mapping and then use 'store' and 'load' to convert data:
 
 <pre>
 test :: Sync
-test = sync [
+test = sync "table" "idcolumn" "garbage" [
   field "x"      "xrow"     int,     -- ^ 'x' will be stored in 'xrow' column with type int
   field "name"   "namerow"  string]  -- ^ 'name' will be stored in 'namerow' column with type string
-  blob "garbage"                     -- ^ other data will be stored in hstore column 'garbage'
 
-testData :: M.Map ByteString ByteString
+testData = SyncMap
 testData = M.fromList [
   ("x", "123"),
   ("name", "Vasya"),
   ("age", "99"),
   ("flag", "some")]
 
--- | To store data, convert Map with function 'store' to list of Action, then use this list in query
--- (UPDATE or INSERT)
-testStore :: Either String (M.Map String Action)
-testStore = store test testData
--- ^ Right (fromList [
---     ("xrow", Plain "123"),
---     ("namerow", Escape "Vasya"),
---     undefined] -- not implemented yet
+-- | Insert data with key (or Nothing for auto-key)
+insertA :: Connection -> IO ()
+insertA con = insert con test (Just 10) testData
 
--- | To load data, read list of [AsByteString], then convert it to Map with function 'load'
--- Note, that AsByteString tries to load any possible value, converts it to ByteString, but
--- saves information about type to perform check in 'load'.
-testLoad :: [AsByteString] -> Either String (M.Map ByteString ByteString)
-testLoad = load test 
+-- | Select data with key
+selectA :: Connection -> IO ()
+selectA con = select con test 10
+
+-- | Update data with key
+updateA :: Connection -> IO ()
+updateA con = update con test 10 testData
 </pre>
