@@ -39,6 +39,8 @@ instance FromField AsByteString where
 data Type = Type {
     typeField :: SourceType,
     -- ^ No check of type, thx for type classes, we can't pass own RowParser for every field personally
+    typeCreateString :: String,
+    -- ^ Name for table create
     typeKey :: ByteString -> Either String Action }
 
 tryRead :: Read a => ByteString -> Either String a
@@ -52,20 +54,20 @@ sourceType st (AsByteString st' ss')
     | otherwise = Left "Invalid type of field"
 
 fieldType :: Type -> AsByteString -> Either String ByteString
-fieldType (Type tf _) = sourceType tf
+fieldType (Type tf _ _) = sourceType tf
 
 -- | Int type
 int :: Type
-int = Type IntColumn (fmap toField . (tryRead :: ByteString -> Either String Int))
+int = Type IntColumn "integer" (fmap toField . (tryRead :: ByteString -> Either String Int))
 
 -- | Double type
 double :: Type
-double = Type DoubleColumn (fmap toField . (tryRead :: ByteString -> Either String Double))
+double = Type DoubleColumn "double precision" (fmap toField . (tryRead :: ByteString -> Either String Double))
 
 -- | Bool type
 bool :: Type
-bool = Type BoolColumn (fmap toField . (tryRead :: ByteString -> Either String Bool))
+bool = Type BoolColumn "boolean" (fmap toField . (tryRead :: ByteString -> Either String Bool))
 
 -- | String type
 string :: Type
-string = Type StringColumn (fmap toField . return)
+string = Type StringColumn "text" (fmap toField . return)

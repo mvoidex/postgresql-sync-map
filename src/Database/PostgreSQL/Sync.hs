@@ -23,7 +23,8 @@ module Database.PostgreSQL.Sync (
     field,
     store,
     load,
-    
+
+    create,
     insert, select, update,
     
     module Database.PostgreSQL.Sync.Types
@@ -31,6 +32,7 @@ module Database.PostgreSQL.Sync (
 
 import Blaze.ByteString.Builder (fromByteString)
 import Control.Monad
+import qualified Control.Exception as E
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as C8
 import Database.PostgreSQL.Sync.Types
@@ -61,7 +63,7 @@ data SyncField = SyncField {
     syncType :: Type }        -- ^ Type of value
 
 instance Show SyncField where
-    show (SyncField k c (Type st _)) = unwords [k, "<->", c, "::", show st] -- TODO: Show type
+    show (SyncField k c (Type st _ _)) = unwords [k, "<->", c, "::", show st] -- TODO: Show type
 
 -- | Make sync
 sync :: String -> String -> String -> [SyncField] -> Sync
@@ -98,9 +100,30 @@ load (Sync tbl i g cs) = fmap (M.fromList) . mapM fromByteString . M.toList wher
         f' <- fieldType t' f
         return (C8.pack k', f')
 
+tt q a = Debug.traceShow q a
+
 ttt q v a = do
     -- f <- formatQuery undefined q v
     Debug.traceShow q $ Debug.traceShow v a
+
+-- | Create table if not exists
+create :: Connection -> Sync -> IO ()
+create con s@(Sync tbl icol hs cons) = do
+    hasTable <- E.catch (tt qcheck (execute_ con qcheck) >> return True) (sqlError False)
+    unless hasTable $ do
+        tt qcreate (execute_ con qcreate)
+        commit con
+    where
+        qcheck = fromString $ "select 1 from " ++ tbl ++ " where 1 == 0"
+        qcreate = fromString $ "create table " ++ tbl ++ " (" ++ intercalate ", " cols ++ ")"
+        sqlError :: a -> E.SomeException -> IO a
+        sqlError v _ = return v
+        cols :: [String]
+        cols = concat [
+            [icol ++ " integer not null unique primary key"],
+            map asType cons,
+            [hs ++ " hstore"]]
+        asType (SyncField _ c (Type _ cs _)) = unwords [c, cs]
 
 -- | Insert Map into postgresql
 insert :: Connection -> Sync -> Maybe Int -> SyncMap -> IO ()
