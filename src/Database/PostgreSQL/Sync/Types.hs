@@ -1,43 +1,97 @@
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
+
 module Database.PostgreSQL.Sync.Types (
-    SourceType(..),
-    AsByteString(..),
-    Type(..), fieldType,
+    SyncMap,
+    FieldType(..), FieldValue(..),
+    Type(..),
+    valueType,
+    valueToSyncMap,
     int, double, bool, string,
     
     Action
     ) where
 
+import Blaze.ByteString.Builder (fromByteString)
 import Control.Applicative
+import Control.Arrow
 import Data.Char
 import Data.List
+import Data.String
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as C8
 import Database.PostgreSQL.Simple.FromField
 import Database.PostgreSQL.Simple.ToField
+import qualified Data.Map as M
 
--- | Source type
-data SourceType = IntColumn | DoubleColumn | BoolColumn | StringColumn
-    deriving (Eq, Ord, Read, Show, Bounded, Enum)
+type SyncMap = M.Map ByteString ByteString
 
--- | Convertible to ByteString
-data AsByteString = AsByteString {
-    asSourceType :: SourceType,
-    asByteString :: ByteString }
-        deriving (Eq, Ord, Read, Show)
+data FieldType = IntType | DoubleType | BoolType | StringType | HStoreType
+    deriving (Eq, Ord, Read, Show, Enum, Bounded)
 
-instance FromField AsByteString where
+-- | Value in field
+data FieldValue = IntValue Int | DoubleValue Double | BoolValue Bool | StringValue String | HStoreValue SyncMap
+    deriving (Eq, Ord, Read, Show)
+
+valueType :: FieldValue -> FieldType
+valueType (IntValue _) = IntType
+valueType (DoubleValue _) = DoubleType
+valueType (BoolValue _) = BoolType
+valueType (StringValue _) = StringType
+valueType (HStoreValue _) = HStoreType 
+
+showToSyncMap :: Show a => String -> a -> SyncMap
+showToSyncMap k v = M.singleton (fromString k) (fromString $ show v)
+
+valueToSyncMap :: String -> FieldValue -> SyncMap
+valueToSyncMap k (IntValue i) = showToSyncMap k i
+valueToSyncMap k (DoubleValue i) = showToSyncMap k i
+valueToSyncMap k (BoolValue i) = showToSyncMap k i
+valueToSyncMap k (StringValue i) = showToSyncMap k i
+valueToSyncMap _ (HStoreValue i) = i
+
+instance FromField SyncMap where
+    fromField f Nothing = return M.empty
+    fromField f (Just s) = parse s where
+        trim = fst . C8.breakEnd (not . isSpace) . snd . C8.break (not . isSpace)
+        trimq = removeq . trim where
+            removeq s
+                | C8.null s = s
+                | C8.head s == '"' && C8.last s == '"' = C8.init . C8.tail $ s
+                | otherwise = s
+        -- | TODO: Escape!
+        parse = 
+            C8.split ',' >>>
+            mapM (
+                C8.breakSubstring (fromString "=>") >>>
+                (trimq *** (fmap trimq . dropPrefix (fromString "=>"))) >>>
+                check) >>>
+            fmap M.fromList
+            where
+                dropPrefix s ss
+                    | s `C8.isPrefixOf` ss = return $ C8.drop (C8.length s) ss
+                    | otherwise = empty
+                check (l, r) = fmap ((,) l) r
+        -- parse = M.fromList . map (C8.breakSubstring (fromString "=>") >>> (trimq *** (trimq . C8.drop 2))) . C8.split ','
+
+instance ToField SyncMap where
+    toField = Many . plainQuote . intersperse (plain ", ") . map hstoredValue . M.toList where
+        plain = Plain . fromByteString . fromString
+        plainQuote = ([plain "'"] ++) . (++ [plain "'"])
+        -- | TODO: Escape!
+        hstoredValue (k, v) = Many [Plain (fromByteString k), plain "=>", Plain (fromByteString v)]
+
+instance FromField FieldValue where
     fromField f d = foldr1 (<|>) tries where
         tries = [
-            (showBS IntColumn :: Int -> AsByteString) <$> fromField f d,
-            (showBS DoubleColumn :: Double -> AsByteString) <$> fromField f d,
-            (showBS BoolColumn :: Bool -> AsByteString) <$> fromField f d,
-            (AsByteString StringColumn) <$> fromField f d]
-        showBS :: (Show a) => SourceType -> a -> AsByteString
-        showBS t = AsByteString t . C8.pack . show
+            HStoreValue <$> fromField f d,
+            IntValue <$> fromField f d,
+            DoubleValue <$> fromField f d,
+            BoolValue <$> fromField f d,
+            StringValue <$> fromField f d]
 
 -- | Type of column
 data Type = Type {
-    typeField :: SourceType,
+    typeField :: FieldType,
     -- ^ No check of type, thx for type classes, we can't pass own RowParser for every field personally
     typeCreateString :: String,
     -- ^ Name for table create
@@ -48,26 +102,27 @@ tryRead bs = case reads (C8.unpack bs) of
     [(v, s)] -> if all isSpace s then Right v else Left "Can't read value"
     _ -> Left "Can't read value"
 
-sourceType :: SourceType -> AsByteString -> Either String ByteString
+{-
 sourceType st (AsByteString st' ss')
     | st == st' = Right ss'
     | otherwise = Left "Invalid type of field"
 
 fieldType :: Type -> AsByteString -> Either String ByteString
 fieldType (Type tf _ _) = sourceType tf
+-}
 
 -- | Int type
 int :: Type
-int = Type IntColumn "integer" (fmap toField . (tryRead :: ByteString -> Either String Int))
+int = Type IntType "integer" (fmap toField . (tryRead :: ByteString -> Either String Int))
 
 -- | Double type
 double :: Type
-double = Type DoubleColumn "double precision" (fmap toField . (tryRead :: ByteString -> Either String Double))
+double = Type DoubleType "double precision" (fmap toField . (tryRead :: ByteString -> Either String Double))
 
 -- | Bool type
 bool :: Type
-bool = Type BoolColumn "boolean" (fmap toField . (tryRead :: ByteString -> Either String Bool))
+bool = Type BoolType "boolean" (fmap toField . (tryRead :: ByteString -> Either String Bool))
 
 -- | String type
 string :: Type
-string = Type StringColumn "text" (fmap toField . return)
+string = Type StringType "text" (fmap toField . return)

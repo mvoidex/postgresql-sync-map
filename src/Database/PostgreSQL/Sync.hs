@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving #-}
 
 -- | To make convertor to and from specified map, use list of field connectors:
 -- @
@@ -17,36 +17,37 @@
 -- update con test 10 (M.fromList [("x", "333"), ("foo", "baz"), ("qoo", "aaa")]
 -- @
 module Database.PostgreSQL.Sync (
-    SyncMap,
     Sync, SyncField,
     sync,
     field,
     store,
     load,
 
+    TIO,
     create,
     insert, select, update,
+    transaction,
     
     module Database.PostgreSQL.Sync.Types
     ) where
 
 import Blaze.ByteString.Builder (fromByteString)
+import Control.Applicative
 import Control.Monad
+import Control.Monad.Reader
 import qualified Control.Exception as E
 import Data.ByteString (ByteString)
+import Data.Monoid
 import qualified Data.ByteString.Char8 as C8
 import Database.PostgreSQL.Sync.Types
 import Database.PostgreSQL.Simple
-import Database.PostgreSQL.Simple.ToField (Action(..))
+import Database.PostgreSQL.Simple.ToField (Action(..), ToField(..))
 import qualified Database.PostgreSQL.Simple.ToRow as PG
 import Data.List hiding (insert)
 import Data.String
 import qualified Data.Map as M
 
 import qualified Debug.Trace as Debug
-
--- | Map type
-type SyncMap = M.Map ByteString ByteString
 
 -- | Sync connectors
 data Sync = Sync {
@@ -78,7 +79,7 @@ store :: Sync -> SyncMap -> Either String (M.Map String Action)
 store (Sync tbl i g cs) = fmap M.fromList . toActions . M.toList where
     toActions = showActions . partition hasColumn where
         showActions (cols, hstored) = do
-            hstored' <- return $ hstoredAction hstored
+            hstored' <- return $ toField (M.fromList hstored)
             cols' <- mapM toAction cols
             return ((g, hstored') : cols')
     hasColumn (k, _) = any ((== k) . C8.pack . syncKey) cs
@@ -86,19 +87,19 @@ store (Sync tbl i g cs) = fmap M.fromList . toActions . M.toList where
         (SyncField k' c' t') <- maybe (Left $ "Unable to find key " ++ C8.unpack k) return $ find ((== k) . C8.pack . syncKey) cs
         v' <- typeKey t' v
         return (c', v')
-    hstoredAction = Many . plainQuote . intersperse (plain ", ") . map hstoredValue where
-        plain = Plain . fromByteString . fromString
-        plainQuote = ([plain "'"] ++) . (++ [plain "'"])
-        hstoredValue (k, v) = Many [Escape k, plain "=>", Escape v]
 
 -- | Load Map from postgresql
-load :: Sync -> M.Map String AsByteString -> Either String SyncMap
-load (Sync tbl i g cs) = fmap (M.fromList) . mapM fromByteString . M.toList where
-    -- TODO: Load hstore!
-    fromByteString (c, f) = do
-        (SyncField k' c' t') <- maybe (Left $ "Unable to find column " ++ c) return $ find ((== c) . syncColumn) cs
-        f' <- fieldType t' f
-        return (C8.pack k', f')
+load :: Sync -> M.Map String FieldValue -> Either String SyncMap
+load (Sync tbl i g cs) = fmap mconcat . mapM fromFieldValue . M.toList where
+    fromFieldValue (c, v)
+        | c == g = case v of
+            HStoreValue m -> Right m
+            _ -> Left "Invalid type, must be hstore"
+        | otherwise = do
+            (SyncField k' c' (Type t' _ _)) <- maybe (Left $ "Unable to find column " ++ c) return $ find ((== c) . syncColumn) cs
+            if t' /= valueType v
+                then Left ("Type mismatching, need type " ++ show t' ++ ", got " ++ show (valueType v))
+                else Right $ valueToSyncMap k' v
 
 tt q a = Debug.traceShow q a
 
@@ -106,15 +107,27 @@ ttt q v a = do
     -- f <- formatQuery undefined q v
     Debug.traceShow q $ Debug.traceShow v a
 
+newtype TIO a = TIO (ReaderT Connection IO a)
+    deriving (Monad, Functor, Applicative, MonadIO)
+
+connection :: TIO Connection
+connection = TIO ask
+
 -- | Create table if not exists
-create :: Connection -> Sync -> IO ()
-create con s@(Sync tbl icol hs cons) = do
-    hasTable <- E.catch (tt qcheck (execute_ con qcheck) >> return True) (sqlError False)
-    unless hasTable $ do
-        tt qcreate (execute_ con qcreate)
-        commit con
+create :: Sync -> TIO ()
+create s@(Sync tbl icol hs cons) = do
+    con <- connection
+    liftIO $ do
+        putStrLn $ "has table " ++ tbl ++ "?"
+        hasTable <- E.catch (tt qcheck (execute_ con qcheck) >> return True) (sqlError False)
+        putStrLn $ if hasTable then "yes" else "no"
+        unless hasTable $ do
+            putStrLn "creating table"
+            tt qcreate (execute_ con qcreate)
+            putStrLn "commiting"
+            commit con
     where
-        qcheck = fromString $ "select 1 from " ++ tbl ++ " where 1 == 0"
+        qcheck = fromString $ "select 1 from " ++ tbl ++ " where 1 = 0"
         qcreate = fromString $ "create table " ++ tbl ++ " (" ++ intercalate ", " cols ++ ")"
         sqlError :: a -> E.SomeException -> IO a
         sqlError v _ = return v
@@ -126,37 +139,45 @@ create con s@(Sync tbl icol hs cons) = do
         asType (SyncField _ c (Type _ cs _)) = unwords [c, cs]
 
 -- | Insert Map into postgresql
-insert :: Connection -> Sync -> Maybe Int -> SyncMap -> IO ()
-insert con s@(Sync tbl icol _ _) i m = void $ either onError onStore $ store s m where
-    onStore m' = ttt q v $ execute con q v where
-        q = fromString $ "insert into " ++ tbl ++ " (" ++ cols ++ ") values (" ++ qms ++ ")"
-        cols = intercalate ", " (ifId (\ i' -> (icol :)) $ M.keys m')
-        qms = intercalate ", " (replicate (ifId (\ i' -> succ) $ M.size m') "?")
-        v = ifId (\ i' -> (PG.toRow (Only i') ++)) $ M.elems m'
-    onError str = error $ "Unable to insert data: " ++ str
-    -- update value if id set
-    ifId f = maybe id f i
+insert :: Sync -> Maybe Int -> SyncMap -> TIO ()
+insert s@(Sync tbl icol _ _) i m = connection >>= insert' where
+    insert' con = liftIO $ void $ either onError onStore $ store s m where
+        onStore m' = ttt q v $ execute con q v where
+            q = fromString $ "insert into " ++ tbl ++ " (" ++ cols ++ ") values (" ++ qms ++ ")"
+            cols = intercalate ", " (ifId (\ i' -> (icol :)) $ M.keys m')
+            qms = intercalate ", " (replicate (ifId (\ i' -> succ) $ M.size m') "?")
+            v = ifId (\ i' -> (PG.toRow (Only i') ++)) $ M.elems m'
+        onError str = error $ "Unable to insert data: " ++ str
+        -- update value if id set
+        ifId f = maybe id f i
 
 -- | Select row by id
-select :: Connection -> Sync -> Int -> IO SyncMap
-select con s@(Sync tbl icol _ rs) i = ttt q (Only i) (query con q (Only i)) >>= getHead >>= either onError return . load s . zipCols where
-    q = fromString $ "select " ++ cols ++ " from " ++ tbl ++ " where " ++ icol ++ " = ?"
-    cols = intercalate ", " $ map syncColumn rs
-    zipCols = M.fromList . zip (map syncColumn rs)
-    getHead [x] = return x
-    getHead xs = error $ "Expected one row, returned " ++ show (length xs) ++ " rows"
-    onError str = error $ "Unable to convert data on select: " ++ str
+select :: Sync -> Int -> TIO SyncMap
+select s@(Sync tbl icol g rs) i = connection >>= select' where
+    select' con = liftIO $ ttt q (Only i) (query con q (Only i)) >>= getHead >>= either onError return . load s . zipCols where
+        q = fromString $ "select " ++ cols ++ " from " ++ tbl ++ " where " ++ icol ++ " = ?"
+        cols = intercalate ", " $ (map syncColumn rs ++ [g])
+        zipCols = M.fromList . zip (map syncColumn rs ++ [g])
+        getHead [x] = return x
+        getHead xs = error $ "Expected one row, returned " ++ show (length xs) ++ " rows"
+        onError str = error $ "Unable to convert data on select: " ++ str
 
 -- | Update by id with values, stored in map
-update :: Connection -> Sync -> Int -> SyncMap -> IO ()
-update con s@(Sync tbl icol g _) i m = void $ either onError onUpdate $ store s m where
-    onUpdate m' = ttt q v $ execute con q v where
-        q = fromString $ "update " ++ tbl ++ " set " ++ cols ++ " where " ++ icol ++ " = ?"
-        -- TODO: hstore must be updated with || operator
-        cols = intercalate ", " $ map updater $ M.keys m'
-        updater v
-            -- FIXME: dirty
-            | v == g = g ++ " = " ++ g ++ " || ?"
-            | otherwise = v ++ " = ?"
-        v = M.elems m' ++ PG.toRow (Only i)
-    onError str = error $ "Unable to update data: " ++ str
+update :: Sync -> Int -> SyncMap -> TIO ()
+update s@(Sync tbl icol g _) i m = connection >>= update' where
+    update' con = liftIO $ void $ either onError onUpdate $ store s m where
+        onUpdate m' = ttt q v $ execute con q v where
+            q = fromString $ "update " ++ tbl ++ " set " ++ cols ++ " where " ++ icol ++ " = ?"
+            -- TODO: hstore must be updated with || operator
+            cols = intercalate ", " $ map updater $ M.keys m'
+            updater v
+                -- FIXME: dirty
+                | v == g = g ++ " = " ++ g ++ " || ?"
+                | otherwise = v ++ " = ?"
+            v = M.elems m' ++ PG.toRow (Only i)
+        onError str = error $ "Unable to update data: " ++ str
+
+-- | Transaction
+transaction :: Connection -> TIO a -> IO a
+transaction con (TIO act) = runReaderT act con
+--transaction con (TIO act) = withTransaction con (runReaderT act con)

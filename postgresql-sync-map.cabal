@@ -15,6 +15,8 @@ library
         blaze-builder         >= 0.3 && < 0.4,
         containers            >= 0.4 && < 0.5,
         bytestring            >= 0.9 && < 1.0,
+        mtl                   >= 2.0 && < 2.1,
+        transformers          >= 0.2 && < 0.3,
         postgresql-simple     >= 0.1 && < 0.2
     exposed-modules:
         Database.PostgreSQL.Sync
