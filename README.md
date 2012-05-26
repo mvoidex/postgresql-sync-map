@@ -15,22 +15,36 @@ testData = SyncMap
 testData = M.fromList [
   ("x", "123"),
   ("name", "Vasya"),
-  ("age", "99"),
-  ("flag", "some")]
+  ("age", "99"),           -- ^ hstore
+  ("flag", "some")]        -- ^ hstore
+
+testUpdate = SyncMap
+testUpdate = M.fromList [
+  ("x", "222"),            -- ^ Update field
+  ("flag", "some2"),       -- ^ Update field in hstore
+  ("new", "111")]          -- ^ Add new field to hstore
 
 -- | Create table
-createA :: Connection -> IO ()
-createA con = create con test
+createA :: TIO ()
+createA = create test
 
 -- | Insert data with key (or Nothing for auto-key)
-insertA :: Connection -> IO ()
-insertA con = insert con test (Just 10) testData
+insertA :: Int -> SyncMap -> TIO ()
+insertA i = insert test (Just i)
 
 -- | Select data with key
-selectA :: Connection -> IO ()
-selectA con = select con test 10
+selectA :: Int -> TIO SyncMap
+selectA = select test
 
 -- | Update data with key
-updateA :: Connection -> IO ()
-updateA con = update con test 10 testData
+updateA :: Int -> SyncMap -> TIO ()
+updateA i = update test i
+
+foo :: Connection -> IO ()
+foo con = transaction con $ do
+  createA
+  insertA 1 testData      -- x=123, name=Vasya, {age=>99,flag=>some}
+  updateA 1 testUpdate    -- x=222, name=Vasya, {age=>99,flag=>some2,new=>111}
+  m <- selectA 1
+  liftIO $ print m
 </pre>
