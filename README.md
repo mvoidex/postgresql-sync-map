@@ -18,6 +18,10 @@ testData = M.fromList [
   ("age", "99"),
   ("flag", "some")]
 
+-- | Create table
+createA :: Connection -> IO ()
+createA con = create con test
+
 -- | Insert data with key (or Nothing for auto-key)
 insertA :: Connection -> IO ()
 insertA con = insert con test (Just 10) testData
