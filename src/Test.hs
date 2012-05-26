@@ -1,7 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Test (
-    test, testMap
+    test, testMap,
+    run, runCmd
     ) where
 
 import qualified Control.Exception as E
@@ -14,6 +15,7 @@ import Data.List (intercalate)
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.FromField
 import Database.PostgreSQL.Sync
+import Data.Function
 
 test :: Sync
 test = sync "test" "id" "garbage" [
@@ -46,19 +48,49 @@ elog act = E.catch act onError where
     onError :: E.SomeException -> IO ()
     onError e = putStrLn $ "Failed with: " ++ show e
 
-data AnyField = AnyField { anyField :: ByteString }
-
-instance FromField AnyField where
-    fromField f Nothing = return $ AnyField (C8.pack "(null)")
-    fromField f (Just s) = return $ AnyField s
+runCmd :: IO ()
+runCmd = do
+    con <- connect local
+    elog $ void $ execute_ con "create extension hstore"
+    elog $ void $ execute_ con "drop table test"
+    transaction con $ create test
+    process [
+        ("quit", stop),
+        ("insert", takt $ do
+            i <- intIO
+            m <- dataIO
+            transaction con $ insert test (Just i) m),
+        ("select", takt $ do
+            i <- intIO
+            m <- transaction con $ select test i
+            print m),
+        ("update", takt $ do
+            i <- intIO
+            m <- dataIO
+            transaction con $ update test i m)]
+    where
+        intIO :: IO Int
+        intIO = putStrLn "index:" >> (getLine >>= readIO)
+        dataIO :: IO SyncMap
+        dataIO = fmap M.fromList (putStrLn "data:" >> (getLine >>= readIO))
+        
+        process ks = do
+            k <- getLine
+            case lookup k ks of
+                Nothing -> do
+                    putStrLn $ "Unknown command, possible commands are " ++ (intercalate ", " $ map fst ks)
+                    process ks
+                Just a -> do
+                    b <- a
+                    if b then process ks else return ()
+        
+        stop = return False
+        takt act = elog act >> return True
 
 run :: IO ()
 run = do
     con <- connect local
     elog $ void $ execute_ con "CREATE EXTENSION hstore"
-    elog $ void $ execute_ con "create table testa (id integer not null unique primary key, xrow integer, namerow text, garbage hstore)"
-    commit con
-    elog $ void $ execute_ con "drop table testa"
     elog $ void $ execute_ con "drop table test"
     transaction con $ create test
     transaction con $ do
@@ -69,5 +101,5 @@ run = do
         update test 1 testMap2
         sm' <- select test 1
         liftIO $ putStrLn $ "In 1: " ++ show sm'
-    anys <- query_ con "select * from test"
-    mapM_ putStrLn $ map (intercalate " | " . map (C8.unpack . anyField)) $ anys
+    --anys <- query_ con "select * from test"
+    --mapM_ putStrLn $ map (intercalate " | " . map (C8.unpack . anyField)) $ anys
