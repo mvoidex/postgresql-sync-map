@@ -78,7 +78,14 @@ instance ToField SyncMap where
         plain = Plain . fromByteString . fromString
         plainQuote = ([plain "'"] ++) . (++ [plain "'"])
         -- | TODO: Escape!
-        hstoredValue (k, v) = Many [Plain (fromByteString k), plain "=>", Plain (fromByteString v)]
+        hstoredValue (k, v) = Many [byteString k, plain "=>", byteString v] where
+            byteString b
+                | C8.any (`elem` "'") b = error "HStore keys and values can't contain single quotes"
+                | C8.all (\c -> isDigit c || isAlpha c) b = Plain (fromByteString b)
+                | C8.all (\c -> isDigit c || isAlpha c || (c `elem` " \"")) b = Plain (fromByteString $ escaped b)
+                | otherwise = error $ "HStore key or value has invalid value: " ++ show b
+            escaped = C8.cons '"' . (`C8.snoc` '"') . C8.intercalate (C8.pack "\\\"") . C8.split '"'
+        -- hstoredValue (k, v) = Many [Plain (fromByteString k), plain "=>", Plain (fromByteString v)]
 
 instance FromField FieldValue where
     fromField f d = foldr1 (<|>) tries where
