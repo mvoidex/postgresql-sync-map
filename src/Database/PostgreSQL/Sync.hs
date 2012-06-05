@@ -17,13 +17,13 @@
 -- update con test 10 (M.fromList [("x", "333"), ("foo", "baz"), ("qoo", "aaa")]
 -- @
 module Database.PostgreSQL.Sync (
-    Sync, SyncField,
+    Sync(..), SyncField(..),
     sync,
     field,
     store,
     load,
 
-    TIO,
+    TIO, connection,
     create,
     insert, select, update,
     transaction,
@@ -110,6 +110,7 @@ ttt q v a = do
 newtype TIO a = TIO (ReaderT Connection IO a)
     deriving (Monad, Functor, Applicative, MonadIO)
 
+-- | Get connection inside monad
 connection :: TIO Connection
 connection = TIO ask
 

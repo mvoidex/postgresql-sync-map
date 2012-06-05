@@ -6,6 +6,7 @@ module Database.PostgreSQL.Sync.Types (
     Type(..),
     valueType,
     valueToSyncMap,
+    escapeHStore,
     int, double, bool, string,
     
     Action
@@ -73,18 +74,27 @@ instance FromField SyncMap where
                 check (l, r) = fmap ((,) l) r
         -- parse = M.fromList . map (C8.breakSubstring (fromString "=>") >>> (trimq *** (trimq . C8.drop 2))) . C8.split ','
 
+escapeHStore :: ByteString -> ByteString
+escapeHStore b
+    | C8.any (`elem` "'") b = error "HStore keys and values can't contain single quotes"
+    | C8.all (\c -> isDigit c || isAlpha c) b = b
+    | C8.all (\c -> isDigit c || isAlpha c || (c `elem` " \"")) b = escaped b
+    | otherwise = error $ "HStore key or value has invalid value: " ++ show b
+
+escaped = C8.cons '"' . (`C8.snoc` '"') . C8.intercalate (C8.pack "\\\"") . C8.split '"'
+
 instance ToField SyncMap where
     toField = Many . plainQuote . intersperse (plain ", ") . map hstoredValue . M.toList where
         plain = Plain . fromByteString . fromString
         plainQuote = ([plain "'"] ++) . (++ [plain "'"])
         -- | TODO: Escape!
         hstoredValue (k, v) = Many [byteString k, plain "=>", byteString v] where
-            byteString b
-                | C8.any (`elem` "'") b = error "HStore keys and values can't contain single quotes"
-                | C8.all (\c -> isDigit c || isAlpha c) b = Plain (fromByteString b)
-                | C8.all (\c -> isDigit c || isAlpha c || (c `elem` " \"")) b = Plain (fromByteString $ escaped b)
-                | otherwise = error $ "HStore key or value has invalid value: " ++ show b
-            escaped = C8.cons '"' . (`C8.snoc` '"') . C8.intercalate (C8.pack "\\\"") . C8.split '"'
+            byteString b = Plain (fromByteString $ escapeHStore b)
+            --    | C8.any (`elem` "'") b = error "HStore keys and values can't contain single quotes"
+            --    | C8.all (\c -> isDigit c || isAlpha c) b = Plain (fromByteString b)
+            --    | C8.all (\c -> isDigit c || isAlpha c || (c `elem` " \"")) b = Plain (fromByteString $ escaped b)
+            --    | otherwise = error $ "HStore key or value has invalid value: " ++ show b
+            --escaped = C8.cons '"' . (`C8.snoc` '"') . C8.intercalate (C8.pack "\\\"") . C8.split '"'
         -- hstoredValue (k, v) = Many [Plain (fromByteString k), plain "=>", Plain (fromByteString v)]
 
 instance FromField FieldValue where
