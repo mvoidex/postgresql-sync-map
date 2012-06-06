@@ -22,13 +22,13 @@ import Data.Function
 import Data.String
 
 test :: Sync
-test = sync "test" "id" "garbage" [
+test = sync "test" "id" "garbage" ["blah", "quux", "quuz"] [
     field "x"    "xrow"    int,
     field "name" "namerow" string,
-    field "i"    "irow"    int]
+    reference "i" "irow" "test2"]
 
 test2 :: Sync
-test2 = sync "test2" "id" "garbage" [
+test2 = sync "test2" "id" "garbage" ["ololo"] [
     field "car"  "car"     string,
     field "age"  "age"     int]
 
@@ -117,7 +117,7 @@ runCmd = do
             mapM_ putStrLn $ map (intercalate " | " . map (C8.unpack . toAnyValue)) anys),
         ("report", takt $ do
             r <- reportIO
-            rs <- transaction con $ generate test r
+            rs <- transaction con $ generate [test, test2] r
             mapM_ putStrLn $ map (intercalate " | " . map show) rs)]
     where
         intIO :: IO Int

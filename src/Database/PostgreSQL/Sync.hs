@@ -20,6 +20,7 @@ module Database.PostgreSQL.Sync (
     Sync(..), SyncField(..),
     sync,
     field,
+    reference,
     store,
     load,
 
@@ -54,29 +55,35 @@ data Sync = Sync {
     syncTable :: String,
     syncId :: String,
     syncHStore :: String,
+    syncHStoreKeys :: [String],
     syncConnectors :: [SyncField] }
         deriving (Show)
 
 -- | Field sync connector
 data SyncField = SyncField {
-    syncKey :: String,        -- ^ Key in Map
-    syncColumn :: String,     -- ^ Column name in database
-    syncType :: Type }        -- ^ Type of value
+    syncKey :: String,                 -- ^ Key in Map
+    syncColumn :: String,              -- ^ Column name in database
+    syncType :: Either Type String }   -- ^ Type of value or reference to table
 
 instance Show SyncField where
-    show (SyncField k c (Type st _ _)) = unwords [k, "<->", c, "::", show st] -- TODO: Show type
+    show (SyncField k c (Left (Type st _ _))) = unwords [k, "<->", c, "::", show st]
+    show (SyncField k c (Right s)) = unwords [k, "<->", c, "::", "reference[", s, "]"]
 
 -- | Make sync
-sync :: String -> String -> String -> [SyncField] -> Sync
+sync :: String -> String -> String -> [String] -> [SyncField] -> Sync
 sync = Sync
 
 -- | Connect field
 field :: String -> String -> Type -> SyncField
-field = SyncField
+field k c t = SyncField k c (Left t)
+
+-- | Connect reference
+reference :: String -> String -> String -> SyncField
+reference k c t = SyncField k c (Right t)
 
 -- | Store Map in postgresql
 store :: Sync -> SyncMap -> Either String (M.Map String Action)
-store (Sync tbl i g cs) = fmap M.fromList . toActions . M.toList where
+store (Sync tbl i g _ cs) = fmap M.fromList . toActions . M.toList where
     toActions = showActions . partition hasColumn where
         showActions (cols, hstored) = do
             hstored' <- return $ toField (M.fromList hstored)
@@ -85,20 +92,20 @@ store (Sync tbl i g cs) = fmap M.fromList . toActions . M.toList where
     hasColumn (k, _) = any ((== k) . C8.pack . syncKey) cs
     toAction (k, v) = do
         (SyncField k' c' t') <- maybe (Left $ "Unable to find key " ++ C8.unpack k) return $ find ((== k) . C8.pack . syncKey) cs
-        v' <- typeKey t' v
+        v' <- valueToAction t' v
         return (c', v')
 
 -- | Load Map from postgresql
 load :: Sync -> M.Map String FieldValue -> Either String SyncMap
-load (Sync tbl i g cs) = fmap mconcat . mapM fromFieldValue . M.toList where
+load (Sync tbl i g _ cs) = fmap mconcat . mapM fromFieldValue . M.toList where
     fromFieldValue (c, v)
         | c == g = case v of
             HStoreValue m -> Right m
             _ -> Left "Invalid type, must be hstore"
         | otherwise = do
-            (SyncField k' c' (Type t' _ _)) <- maybe (Left $ "Unable to find column " ++ c) return $ find ((== c) . syncColumn) cs
-            if t' /= valueType v
-                then Left ("Type mismatching, need type " ++ show t' ++ ", got " ++ show (valueType v))
+            (SyncField k' c' t') <- maybe (Left $ "Unable to find column " ++ c) return $ find ((== c) . syncColumn) cs
+            if typeType t' /= valueType v
+                then Left ("Type mismatching, need type " ++ show (typeType t') ++ ", got " ++ show (valueType v))
                 else Right $ valueToSyncMap k' v
 
 tt q a = Debug.traceShow q a
@@ -116,7 +123,7 @@ connection = TIO ask
 
 -- | Create table if not exists
 create :: Sync -> TIO ()
-create s@(Sync tbl icol hs cons) = do
+create s@(Sync tbl icol hs _ cons) = do
     con <- connection
     liftIO $ do
         putStrLn $ "has table " ++ tbl ++ "?"
@@ -137,11 +144,12 @@ create s@(Sync tbl icol hs cons) = do
             [icol ++ " integer not null unique primary key"],
             map asType cons,
             [hs ++ " hstore"]]
-        asType (SyncField _ c (Type _ cs _)) = unwords [c, cs]
+        asType (SyncField _ c t) = unwords [c, either typeCreateString (const $ typeCreateString int) t]
+        --asType (SyncField _ c (Type _ cs _)) = unwords [c, cs]
 
 -- | Insert Map into postgresql
 insert :: Sync -> Maybe Int -> SyncMap -> TIO ()
-insert s@(Sync tbl icol _ _) i m = connection >>= insert' where
+insert s@(Sync tbl icol _ _ _) i m = connection >>= insert' where
     insert' con = liftIO $ void $ either onError onStore $ store s m where
         onStore m' = ttt q v $ execute con q v where
             q = fromString $ "insert into " ++ tbl ++ " (" ++ cols ++ ") values (" ++ qms ++ ")"
@@ -154,7 +162,7 @@ insert s@(Sync tbl icol _ _) i m = connection >>= insert' where
 
 -- | Select row by id
 select :: Sync -> Int -> TIO SyncMap
-select s@(Sync tbl icol g rs) i = connection >>= select' where
+select s@(Sync tbl icol g _ rs) i = connection >>= select' where
     select' con = liftIO $ ttt q (Only i) (query con q (Only i)) >>= getHead >>= either onError return . load s . zipCols where
         q = fromString $ "select " ++ cols ++ " from " ++ tbl ++ " where " ++ icol ++ " = ?"
         cols = intercalate ", " $ (map syncColumn rs ++ [g])
@@ -165,7 +173,7 @@ select s@(Sync tbl icol g rs) i = connection >>= select' where
 
 -- | Update by id with values, stored in map
 update :: Sync -> Int -> SyncMap -> TIO ()
-update s@(Sync tbl icol g _) i m = connection >>= update' where
+update s@(Sync tbl icol g _ _) i m = connection >>= update' where
     update' con = liftIO $ void $ either onError onUpdate $ store s m where
         onUpdate m' = ttt q v $ execute con q v where
             q = fromString $ "update " ++ tbl ++ " set " ++ cols ++ " where " ++ icol ++ " = ?"

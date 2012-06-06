@@ -4,9 +4,10 @@ module Database.PostgreSQL.Sync.Types (
     SyncMap,
     FieldType(..), FieldValue(..),
     Type(..),
-    valueType,
+    typeType, valueType,
     valueToSyncMap,
     escapeHStore,
+    valueToAction,
     int, double, bool, string,
     
     Action
@@ -32,6 +33,10 @@ data FieldType = IntType | DoubleType | BoolType | StringType | HStoreType
 -- | Value in field
 data FieldValue = IntValue Int | DoubleValue Double | BoolValue Bool | StringValue String | HStoreValue SyncMap
     deriving (Eq, Ord, Read, Show)
+
+typeType :: Either Type String -> FieldType
+typeType (Left t) = typeField t
+typeType (Right _) = IntType
 
 valueType :: FieldValue -> FieldType
 valueType (IntValue _) = IntType
@@ -119,14 +124,10 @@ tryRead bs = case reads (C8.unpack bs) of
     [(v, s)] -> if all isSpace s then Right v else Left "Can't read value"
     _ -> Left "Can't read value"
 
-{-
-sourceType st (AsByteString st' ss')
-    | st == st' = Right ss'
-    | otherwise = Left "Invalid type of field"
-
-fieldType :: Type -> AsByteString -> Either String ByteString
-fieldType (Type tf _ _) = sourceType tf
--}
+-- | Convert string value to action
+valueToAction :: Either Type String -> ByteString -> Either String Action
+valueToAction (Left t) s = typeKey t s
+valueToAction (Right _) s = valueToAction (Left int) s
 
 -- | Int type
 int :: Type
