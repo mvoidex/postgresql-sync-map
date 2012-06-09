@@ -34,9 +34,8 @@ data FieldType = IntType | DoubleType | BoolType | StringType | HStoreType
 data FieldValue = IntValue Int | DoubleValue Double | BoolValue Bool | StringValue String | HStoreValue SyncMap
     deriving (Eq, Ord, Read, Show)
 
-typeType :: Either Type String -> FieldType
-typeType (Left t) = typeField t
-typeType (Right _) = IntType
+typeType :: Type -> FieldType
+typeType t = typeField t
 
 valueType :: FieldValue -> FieldType
 valueType (IntValue _) = IntType
@@ -125,9 +124,8 @@ tryRead bs = case reads (C8.unpack bs) of
     _ -> Left "Can't read value"
 
 -- | Convert string value to action
-valueToAction :: Either Type String -> ByteString -> Either String Action
-valueToAction (Left t) s = typeKey t s
-valueToAction (Right _) s = valueToAction (Left int) s
+valueToAction :: Type -> ByteString -> Either String Action
+valueToAction t s = typeKey t s
 
 -- | Int type
 int :: Type

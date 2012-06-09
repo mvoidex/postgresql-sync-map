@@ -18,9 +18,9 @@
 -- @
 module Database.PostgreSQL.Sync (
     Sync(..), SyncField(..),
+    Condition(..), condField,
     sync,
     field,
-    reference,
     store,
     load,
 
@@ -53,9 +53,7 @@ import qualified Debug.Trace as Debug
 -- | Sync connectors
 data Sync = Sync {
     syncTable :: String,
-    syncId :: String,
     syncHStore :: String,
-    syncHStoreKeys :: [String],
     syncConnectors :: [SyncField] }
         deriving (Show)
 
@@ -63,27 +61,39 @@ data Sync = Sync {
 data SyncField = SyncField {
     syncKey :: String,                 -- ^ Key in Map
     syncColumn :: String,              -- ^ Column name in database
-    syncType :: Either Type String }   -- ^ Type of value or reference to table
+    syncType :: Type }                 -- ^ Type of value or reference to table
+
+-- | Condition
+data Condition = Condition {
+    conditionString :: String,
+    conditionArguments :: [Action] }
+        deriving (Show)
+
+instance Monoid Condition where
+    mempty = Condition "" []
+    mappend (Condition "" []) r = r
+    mappend l (Condition "" []) = l
+    mappend (Condition sl al) (Condition sr ar) = Condition (sl ++ " and " ++ sr) (al ++ ar)
+
+condField :: Sync -> String -> String
+condField (Sync t h cs) name = case find ((== name) . syncKey) cs of
+    (Just (SyncField k c _)) -> t ++ "." ++ c
+    Nothing -> t ++ "." ++ h ++ " -> '" ++ C8.unpack (escapeHStore (C8.pack name)) ++ "'"
 
 instance Show SyncField where
-    show (SyncField k c (Left (Type st _ _))) = unwords [k, "<->", c, "::", show st]
-    show (SyncField k c (Right s)) = unwords [k, "<->", c, "::", "reference[", s, "]"]
+    show (SyncField k c (Type st _ _)) = unwords [k, "<->", c, "::", show st]
 
 -- | Make sync
-sync :: String -> String -> String -> [String] -> [SyncField] -> Sync
+sync :: String -> String -> [SyncField] -> Sync
 sync = Sync
 
 -- | Connect field
 field :: String -> String -> Type -> SyncField
-field k c t = SyncField k c (Left t)
-
--- | Connect reference
-reference :: String -> String -> String -> SyncField
-reference k c t = SyncField k c (Right t)
+field k c t = SyncField k c t
 
 -- | Store Map in postgresql
 store :: Sync -> SyncMap -> Either String (M.Map String Action)
-store (Sync tbl i g _ cs) = fmap M.fromList . toActions . M.toList where
+store (Sync tbl g cs) = fmap M.fromList . toActions . M.toList where
     toActions = showActions . partition hasColumn where
         showActions (cols, hstored) = do
             hstored' <- return $ toField (M.fromList hstored)
@@ -97,7 +107,7 @@ store (Sync tbl i g _ cs) = fmap M.fromList . toActions . M.toList where
 
 -- | Load Map from postgresql
 load :: Sync -> M.Map String FieldValue -> Either String SyncMap
-load (Sync tbl i g _ cs) = fmap mconcat . mapM fromFieldValue . M.toList where
+load (Sync tbl g cs) = fmap mconcat . mapM fromFieldValue . M.toList where
     fromFieldValue (c, v)
         | c == g = case v of
             HStoreValue m -> Right m
@@ -123,7 +133,7 @@ connection = TIO ask
 
 -- | Create table if not exists
 create :: Sync -> TIO ()
-create s@(Sync tbl icol hs _ cons) = do
+create s@(Sync tbl hs cons) = do
     con <- connection
     liftIO $ do
         putStrLn $ "has table " ++ tbl ++ "?"
@@ -141,49 +151,44 @@ create s@(Sync tbl icol hs _ cons) = do
         sqlError v _ = return v
         cols :: [String]
         cols = concat [
-            [icol ++ " integer not null unique primary key"],
             map asType cons,
             [hs ++ " hstore"]]
-        asType (SyncField _ c t) = unwords [c, either typeCreateString (const $ typeCreateString int) t]
-        --asType (SyncField _ c (Type _ cs _)) = unwords [c, cs]
+        asType (SyncField _ c t) = unwords [c, typeCreateString t]
 
 -- | Insert Map into postgresql
-insert :: Sync -> Maybe Int -> SyncMap -> TIO ()
-insert s@(Sync tbl icol _ _ _) i m = connection >>= insert' where
+insert :: Sync -> SyncMap -> TIO ()
+insert s@(Sync tbl _ _) m = connection >>= insert' where
     insert' con = liftIO $ void $ either onError onStore $ store s m where
         onStore m' = ttt q v $ execute con q v where
             q = fromString $ "insert into " ++ tbl ++ " (" ++ cols ++ ") values (" ++ qms ++ ")"
-            cols = intercalate ", " (ifId (\ i' -> (icol :)) $ M.keys m')
-            qms = intercalate ", " (replicate (ifId (\ i' -> succ) $ M.size m') "?")
-            v = ifId (\ i' -> (PG.toRow (Only i') ++)) $ M.elems m'
+            cols = intercalate ", " $ M.keys m'
+            qms = intercalate ", " $ replicate (M.size m') "?"
+            v = M.elems m'
         onError str = error $ "Unable to insert data: " ++ str
-        -- update value if id set
-        ifId f = maybe id f i
 
--- | Select row by id
-select :: Sync -> Int -> TIO SyncMap
-select s@(Sync tbl icol g _ rs) i = connection >>= select' where
-    select' con = liftIO $ ttt q (Only i) (query con q (Only i)) >>= getHead >>= either onError return . load s . zipCols where
-        q = fromString $ "select " ++ cols ++ " from " ++ tbl ++ " where " ++ icol ++ " = ?"
+-- | Select row by condition
+select :: Sync -> Condition -> TIO SyncMap
+select s@(Sync tbl g rs) (Condition w vs) = connection >>= select' where
+    select' con = liftIO $ ttt q vs (query con q vs) >>= getHead >>= either onError return . load s . zipCols where
+        q = fromString $ "select " ++ cols ++ " from " ++ tbl ++ " where " ++ w
         cols = intercalate ", " $ (map syncColumn rs ++ [g])
         zipCols = M.fromList . zip (map syncColumn rs ++ [g])
         getHead [x] = return x
         getHead xs = error $ "Expected one row, returned " ++ show (length xs) ++ " rows"
         onError str = error $ "Unable to convert data on select: " ++ str
 
--- | Update by id with values, stored in map
-update :: Sync -> Int -> SyncMap -> TIO ()
-update s@(Sync tbl icol g _ _) i m = connection >>= update' where
+-- | Update by condition with values, stored in map
+update :: Sync -> Condition -> SyncMap -> TIO ()
+update s@(Sync tbl g _) (Condition w vs) m = connection >>= update' where
     update' con = liftIO $ void $ either onError onUpdate $ store s m where
         onUpdate m' = ttt q v $ execute con q v where
-            q = fromString $ "update " ++ tbl ++ " set " ++ cols ++ " where " ++ icol ++ " = ?"
-            -- TODO: hstore must be updated with || operator
+            q = fromString $ "update " ++ tbl ++ " set " ++ cols ++ " where " ++ w
             cols = intercalate ", " $ map updater $ M.keys m'
             updater v
                 -- FIXME: dirty
                 | v == g = g ++ " = " ++ g ++ " || ?"
                 | otherwise = v ++ " = ?"
-            v = M.elems m' ++ PG.toRow (Only i)
+            v = M.elems m' ++ vs
         onError str = error $ "Unable to update data: " ++ str
 
 -- | Transaction

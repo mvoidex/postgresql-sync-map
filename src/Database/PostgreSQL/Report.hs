@@ -7,8 +7,7 @@
 -- rs <- transaction con $ generate test reportTemplate
 -- @
 module Database.PostgreSQL.Report (
-    Report(..), Condition,
-    equal, anyValue,
+    Report(..),
     report,
     generate
     ) where
@@ -17,6 +16,7 @@ import Control.Arrow
 import Control.Monad.IO.Class
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as C8
+import Data.Monoid
 import Database.PostgreSQL.Sync
 import Database.PostgreSQL.Simple
 import Data.List
@@ -25,36 +25,23 @@ import Data.String
 
 -- | Report template
 data Report = Report {
-    reportFields :: [(String, Condition)] }
+    reportTables :: [String],
+    reportFields :: [String],
+    reportConditionts :: [Condition] }
+        deriving (Show)
 
--- | Condition on field
-type Condition = String -> Maybe String
-
--- | Field equals to specified value
-equal :: String -> Condition
-equal s = \ n -> Just (n ++ " = " ++ s)
-
--- | Any valud
-anyValue :: Condition
-anyValue = \ n -> Nothing
-
--- | Create report template with list of pairs (field, condition)
-report :: [(String, Condition)] -> Report
+-- | Create report template
+report :: [String] -> [String] -> [Condition] -> Report
 report = Report
 
-data TableRelation = TableRelation {
-    tableName :: String,
-    tableReferences :: [(String, String)] }
-        deriving (Eq, Ord, Read, Show)
-
--- | Create table relation from Sync
-relation :: Sync -> TableRelation
-relation (Sync tbl _ _ _ cons) = TableRelation tbl refs where
-    refs = mapMaybe toReference cons
-    toReference (SyncField k c (Right s)) = Just (c, s)
-    toReference _ = Nothing
+generate :: Report -> TIO [[FieldValue]]
+generate (Report ts fs cs) = connection >>= generate' where
+    generate' con = liftIO $ query con q vs' where
+        (Condition cs' vs') = mconcat cs
+        q = fromString $ "select " ++ intercalate ", " fs ++ " from " ++ intercalate ", " ts ++ (if null cs then "" else " where " ++ cs')
 
 -- | Generate report (with joins if neccessary)
+{-
 generate :: [Sync] -> Report -> TIO [[FieldValue]]
 generate ss r = connection >>= generate' where    
     generate' con = liftIO $ query_ con q where
@@ -72,6 +59,7 @@ generate ss r = connection >>= generate' where
                     stringizeRelation snc = tblName ++ "." ++ idxName ++ " = " ++ idxTable ++ "." ++ syncId snc
         q = fromString $ "select " ++ intercalate ", " names ++ " from " ++ intercalate ", " (map tableName tbls) ++ conds' where
             conds' = if null conds then "" else " where " ++ intercalate " and " conds
+-}
 
 {-
 -- | Generate report
