@@ -17,8 +17,9 @@ import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.FromField
 import Database.PostgreSQL.Simple.FromRow (FromRow)
 import Database.PostgreSQL.Simple.ToField
-import Database.PostgreSQL.Sync
+import Database.PostgreSQL.Syncs
 import Database.PostgreSQL.Report
+import Data.Maybe
 import Data.Function
 import Data.String
 
@@ -35,6 +36,11 @@ test2 = sync "test2" "garbage" [
     field "id"   "id"      int,
     field "car"  "car"     string,
     field "age"  "age"     int]
+
+tests :: Syncs
+tests = syncs [
+    ("test", test),
+    ("test2", test2)]
 
 testMap :: SyncMap
 testMap = M.fromList [
@@ -99,26 +105,25 @@ run = do
     elog $ void $ execute_ con "create extension hstore"
     elog $ void $ execute_ con "drop table test"
     elog $ void $ execute_ con "drop table test2"
-    transaction con $ create test
-    transaction con $ create test2
-    transaction con $ insert test testMap
-    transaction con $ insert test testMap2
-    transaction con $ insert test2 test2Map
-    transaction con $ insert test2 test2Map2
+    transaction con $ create tests
+    transaction con $ insert tests "test" testMap
+    transaction con $ insert tests "test" testMap2
+    transaction con $ insert tests "test2" test2Map
+    transaction con $ insert tests "test2" test2Map2
     process [
         ("quit", stop),
         ("insert", takt $ do
             i <- intIO
             m <- dataIO
-            transaction con $ insert test m),
+            transaction con $ insert tests "test" m),
         ("select", takt $ do
             i <- intIO
-            m <- transaction con $ select test (Condition "id = ?" [toField i])
+            m <- transaction con $ select tests "test" (Condition "id = ?" [toField i])
             print m),
         ("update", takt $ do
             i <- intIO
             m <- dataIO
-            transaction con $ update test (Condition "id = ?" [toField i]) m),
+            transaction con $ update tests "test" (Condition "id = ?" [toField i]) m),
         ("execute", takt $ do
             q <- queryIO
             anys <- elogq $ query_ con (fromString q)
@@ -137,10 +142,15 @@ run = do
         reportIO :: IO Report
         reportIO = do
             putStrLn "fields:"
-            fs <- getLine >>= readIO
+            fs <- fmap (mapMaybe (parseField tests)) (getLine >>= readIO)
             putStrLn "conditions:"
-            cs <- getLine >>= readIO
+            cs <- fmap (map parses) (getLine >>= readIO)
             return $ Report ["test", "test2"] fs (map (\c -> Condition c []) cs)
+            where
+                parses :: String -> String
+                parses = unwords . map tryParseField . words
+                tryParseField :: String -> String
+                tryParseField s = maybe s id $ parseField tests s
         
         process ks = do
             k <- getLine
