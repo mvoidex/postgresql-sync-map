@@ -17,8 +17,6 @@
 -- update con test 10 (M.fromList [("x", "333"), ("foo", "baz"), ("qoo", "aaa")]
 -- @
 module Database.PostgreSQL.Sync (
-    Sync(..), SyncField(..),
-    Condition(..), condField,
     sync,
     field,
     store,
@@ -27,9 +25,11 @@ module Database.PostgreSQL.Sync (
     TIO, connection,
     create,
     insert, select, update,
-    transaction,
+    transaction, inPG,
     
-    module Database.PostgreSQL.Sync.Types
+    module Database.PostgreSQL.Sync.Base,
+    module Database.PostgreSQL.Sync.Types,
+    module Database.PostgreSQL.Sync.Condition
     ) where
 
 import Blaze.ByteString.Builder (fromByteString)
@@ -40,7 +40,9 @@ import qualified Control.Exception as E
 import Data.ByteString (ByteString)
 import Data.Monoid
 import qualified Data.ByteString.Char8 as C8
+import Database.PostgreSQL.Sync.Base
 import Database.PostgreSQL.Sync.Types
+import Database.PostgreSQL.Sync.Condition
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.ToField (Action(..), ToField(..))
 import qualified Database.PostgreSQL.Simple.ToRow as PG
@@ -49,39 +51,6 @@ import Data.String
 import qualified Data.Map as M
 
 import qualified Debug.Trace as Debug
-
--- | Sync connectors
-data Sync = Sync {
-    syncTable :: String,
-    syncHStore :: String,
-    syncConnectors :: [SyncField] }
-        deriving (Show)
-
--- | Field sync connector
-data SyncField = SyncField {
-    syncKey :: String,                 -- ^ Key in Map
-    syncColumn :: String,              -- ^ Column name in database
-    syncType :: Type }                 -- ^ Type of value or reference to table
-
--- | Condition
-data Condition = Condition {
-    conditionString :: String,
-    conditionArguments :: [Action] }
-        deriving (Show)
-
-instance Monoid Condition where
-    mempty = Condition "" []
-    mappend (Condition "" []) r = r
-    mappend l (Condition "" []) = l
-    mappend (Condition sl al) (Condition sr ar) = Condition (sl ++ " and " ++ sr) (al ++ ar)
-
-condField :: Sync -> String -> String
-condField (Sync t h cs) name = case find ((== name) . syncKey) cs of
-    (Just (SyncField k c _)) -> t ++ "." ++ c
-    Nothing -> t ++ "." ++ h ++ " -> '" ++ C8.unpack (escapeHStore (C8.pack name)) ++ "'"
-
-instance Show SyncField where
-    show (SyncField k c (Type st _ _)) = unwords [k, "<->", c, "::", show st]
 
 -- | Make sync
 sync :: String -> String -> [SyncField] -> Sync
@@ -168,9 +137,9 @@ insert s@(Sync tbl _ _) m = connection >>= insert' where
 
 -- | Select row by condition
 select :: Sync -> Condition -> TIO SyncMap
-select s@(Sync tbl g rs) (Condition w vs) = connection >>= select' where
-    select' con = liftIO $ ttt q vs (query con q vs) >>= getHead >>= either onError return . load s . zipCols where
-        q = fromString $ "select " ++ cols ++ " from " ++ tbl ++ " where " ++ w
+select s@(Sync tbl g rs) cond = connection >>= select' where
+    select' con = liftIO $ ttt q (conditionArguments cond) (query con q (conditionArguments cond)) >>= getHead >>= either onError return . load s . zipCols where
+        q = fromString $ "select " ++ cols ++ " from " ++ tbl ++ toWhere cond
         cols = intercalate ", " $ (map syncColumn rs ++ [g])
         zipCols = M.fromList . zip (map syncColumn rs ++ [g])
         getHead [x] = return x
@@ -179,19 +148,25 @@ select s@(Sync tbl g rs) (Condition w vs) = connection >>= select' where
 
 -- | Update by condition with values, stored in map
 update :: Sync -> Condition -> SyncMap -> TIO ()
-update s@(Sync tbl g _) (Condition w vs) m = connection >>= update' where
+update s@(Sync tbl g _) cond m = connection >>= update' where
     update' con = liftIO $ void $ either onError onUpdate $ store s m where
         onUpdate m' = ttt q v $ execute con q v where
-            q = fromString $ "update " ++ tbl ++ " set " ++ cols ++ " where " ++ w
+            q = fromString $ "update " ++ tbl ++ " set " ++ cols ++ toWhere cond
             cols = intercalate ", " $ map updater $ M.keys m'
             updater v
                 -- FIXME: dirty
                 | v == g = g ++ " = " ++ g ++ " || ?"
                 | otherwise = v ++ " = ?"
-            v = M.elems m' ++ vs
+            v = M.elems m' ++ conditionArguments cond
         onError str = error $ "Unable to update data: " ++ str
 
 -- | Transaction
 transaction :: Connection -> TIO a -> IO a
 transaction con (TIO act) = runReaderT act con
 --transaction con (TIO act) = withTransaction con (runReaderT act con)
+
+-- | For now there is no module for use with snaplet-postgresql-simple,
+-- but you can use functions using this simple wrap:
+-- withPG (inPG $ update ...)
+inPG :: TIO a -> Connection -> IO a
+inPG = flip transaction

@@ -1,7 +1,4 @@
 module Database.PostgreSQL.Syncs (
-	Sync(..), Syncs, SyncField(..),
-	Condition(..), syncsField, parseField,
-
 	sync, syncs,
 	field,
 	store,
@@ -12,37 +9,31 @@ module Database.PostgreSQL.Syncs (
 	insert, select, update,
 	transaction,
 
-	module Database.PostgreSQL.Sync.Types
+	module Database.PostgreSQL.Sync.Base,
+	module Database.PostgreSQL.Sync.Types,
+	module Database.PostgreSQL.Sync.Condition
 	) where
 
 import Control.Arrow
 import Database.PostgreSQL.Sync hiding (create, insert, select, update)
+import Database.PostgreSQL.Sync.Base
 import qualified Database.PostgreSQL.Sync as S
 import Database.PostgreSQL.Sync.Types
+import Database.PostgreSQL.Sync.Condition
 import qualified Data.Map as M
 
--- | Syncs table
-type Syncs = M.Map String Sync
-
-syncsField :: Syncs -> String -> String -> Maybe String
-syncsField ss model name = fmap (\s -> condField s name) $ M.lookup model ss
-
--- | Parse field "model.name" to table-related field "table.column" or "table.garbage -> 'name'"
-parseField :: Syncs -> String -> Maybe String
-parseField ss mname = syncsField ss model name where
-	(model, name) = second (drop 1) $ break (== '.') mname
-
 -- | Make syncs
-syncs :: [(String, Sync)] -> Syncs
-syncs = M.fromList
+syncs :: [(String, Sync)] -> [String] -> Syncs
+syncs ss cs = result where
+	result = Syncs (M.fromList ss) (map (\c -> condition result c []) cs)
 
 -- | Create tables
 create :: Syncs -> TIO ()
-create = mapM_ S.create . M.elems
+create = mapM_ S.create . M.elems . syncsSyncs
 
 -- | Perform action on model
 withModel :: Syncs -> String -> (Sync -> a) -> a
-withModel ss name f = maybe (error "No model with name") f $ M.lookup name ss
+withModel ss name f = maybe (error "No model with name") f $ M.lookup name (syncsSyncs ss)
 
 -- | Insert Map into postgresql for model
 insert :: Syncs -> String -> SyncMap -> TIO ()

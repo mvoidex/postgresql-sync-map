@@ -40,7 +40,8 @@ test2 = sync "test2" "garbage" [
 tests :: Syncs
 tests = syncs [
     ("test", test),
-    ("test2", test2)]
+    ("test2", test2)] [
+    "test.x = test2.id"]
 
 testMap :: SyncMap
 testMap = M.fromList [
@@ -118,12 +119,12 @@ run = do
             transaction con $ insert tests "test" m),
         ("select", takt $ do
             i <- intIO
-            m <- transaction con $ select tests "test" (Condition "id = ?" [toField i])
+            m <- transaction con $ select tests "test" (condition tests "test.id = ?" [toField i])
             print m),
         ("update", takt $ do
             i <- intIO
             m <- dataIO
-            transaction con $ update tests "test" (Condition "id = ?" [toField i]) m),
+            transaction con $ update tests "test" (condition tests "test.id = ?" [toField i]) m),
         ("execute", takt $ do
             q <- queryIO
             anys <- elogq $ query_ con (fromString q)
@@ -142,15 +143,10 @@ run = do
         reportIO :: IO Report
         reportIO = do
             putStrLn "fields:"
-            fs <- fmap (mapMaybe (parseField tests)) (getLine >>= readIO)
+            fs <- getLine >>= readIO
             putStrLn "conditions:"
-            cs <- fmap (map parses) (getLine >>= readIO)
-            return $ Report ["test", "test2"] fs (map (\c -> Condition c []) cs)
-            where
-                parses :: String -> String
-                parses = unwords . map tryParseField . words
-                tryParseField :: String -> String
-                tryParseField s = maybe s id $ parseField tests s
+            cs <- getLine >>= readIO
+            return $ report tests fs (map (\c -> condition tests c []) cs)
         
         process ks = do
             k <- getLine
