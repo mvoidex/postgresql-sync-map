@@ -8,7 +8,7 @@ module Database.PostgreSQL.Sync.Types (
     valueToSyncMap,
     escapeHStore,
     valueToAction,
-    int, double, bool, string,
+    int, double, bool, string, time,
     
     Action
     ) where
@@ -24,15 +24,16 @@ import qualified Data.ByteString.Char8 as C8
 import Database.PostgreSQL.Simple.FromField
 import Database.PostgreSQL.Simple.ToField
 import qualified Data.Map as M
+import Data.Time.Clock.POSIX
 
 type SyncMap = M.Map ByteString ByteString
 
-data FieldType = IntType | DoubleType | BoolType | StringType | HStoreType
+data FieldType = IntType | DoubleType | BoolType | StringType | TimeType | HStoreType
     deriving (Eq, Ord, Read, Show, Enum, Bounded)
 
 -- | Value in field
-data FieldValue = IntValue Int | DoubleValue Double | BoolValue Bool | StringValue String | HStoreValue SyncMap
-    deriving (Eq, Ord, Read, Show)
+data FieldValue = IntValue Int | DoubleValue Double | BoolValue Bool | StringValue String | TimeValue POSIXTime | HStoreValue SyncMap
+    deriving (Eq, Ord, Show)
 
 typeType :: Type -> FieldType
 typeType t = typeField t
@@ -42,6 +43,7 @@ valueType (IntValue _) = IntType
 valueType (DoubleValue _) = DoubleType
 valueType (BoolValue _) = BoolType
 valueType (StringValue _) = StringType
+valueType (TimeValue _) = TimeType
 valueType (HStoreValue _) = HStoreType 
 
 showToSyncMap :: Show a => String -> a -> SyncMap
@@ -52,6 +54,7 @@ valueToSyncMap k (IntValue i) = showToSyncMap k i
 valueToSyncMap k (DoubleValue i) = showToSyncMap k i
 valueToSyncMap k (BoolValue i) = showToSyncMap k i
 valueToSyncMap k (StringValue i) = showToSyncMap k i
+valueToSyncMap k (TimeValue i) = showToSyncMap k (floor i :: Integer)
 valueToSyncMap _ (HStoreValue i) = i
 
 instance FromField SyncMap where
@@ -108,6 +111,7 @@ instance FromField FieldValue where
             IntValue <$> fromField f d,
             DoubleValue <$> fromField f d,
             BoolValue <$> fromField f d,
+            (TimeValue . utcTimeToPOSIXSeconds) <$> fromField f d,
             StringValue <$> fromField f d]
 
 -- | Type of column
@@ -142,3 +146,7 @@ bool = Type BoolType "boolean" (fmap toField . (tryRead :: ByteString -> Either 
 -- | String type
 string :: Type
 string = Type StringType "text" (fmap toField . return)
+
+-- | Time type
+time :: Type
+time = Type TimeType "timestamp" (fmap (toField . posixSecondsToUTCTime . (fromIntegral :: Int -> POSIXTime)) . (tryRead :: ByteString -> Either String Int))
