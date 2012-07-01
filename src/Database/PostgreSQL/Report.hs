@@ -9,6 +9,7 @@
 module Database.PostgreSQL.Report (
     Report(..),
     report,
+    reportc,
     generate
     ) where
 
@@ -19,6 +20,7 @@ import qualified Data.ByteString.Char8 as C8
 import Data.Monoid
 import Database.PostgreSQL.Sync
 import Database.PostgreSQL.Simple
+import Data.Either
 import Data.List
 import Data.Maybe
 import Data.String
@@ -37,6 +39,21 @@ report ss fs cs = Report ts pfs (cs ++ syncsRelations ss) where
     fs' = mapMaybe (parseField ss) fs
     ts = nub $ map fst fs'
     pfs = map (\(t, n) -> t ++ "." ++ n) fs'
+
+-- | Create report by field-with-condition strings
+-- Field with condition is one of:
+-- 1. model.name - field without condition
+-- 2. model.name > 10 - field and condition in one place
+reportc :: Syncs -> [String] -> Report
+reportc ss fs = Report ts pfs (cs ++ syncsRelations ss) where
+    fs' = mapMaybe (parseField ss) fs
+    ts = nub $ map fst fs' ++ concatMap conditionTablesAffected cs
+    pfs = map (\(t, n) -> t ++ "." ++ n) fs' ++ concatMap conditionFieldsAffected cs
+    cs = mapMaybe toC fs
+
+    toC s = case parseField ss s of
+        Nothing -> Just $ condition ss s []
+        Just _ -> Nothing
 
 generate :: Report -> TIO [[FieldValue]]
 generate (Report ts fs cs) = connection >>= generate' where

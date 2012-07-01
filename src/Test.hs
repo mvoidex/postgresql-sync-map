@@ -132,6 +132,10 @@ run = do
         ("report", takt $ do
             r <- reportIO
             rs <- transaction con $ generate r
+            mapM_ putStrLn $ map (intercalate " | " . map show) rs),
+        ("reportc", takt $ do
+            r <- reportcIO
+            rs <- transaction con $ generate r
             mapM_ putStrLn $ map (intercalate " | " . map show) rs)]
     where
         intIO :: IO Int
@@ -147,6 +151,11 @@ run = do
             putStrLn "conditions:"
             cs <- getLine >>= readIO
             return $ report tests fs (map (\c -> condition tests c []) cs)
+        reportcIO :: IO Report
+        reportcIO = do
+            putStrLn "(field-with-condition)s:"
+            fs <- getLine >>= readIO
+            return $ reportc tests fs
         
         process ks = do
             k <- getLine

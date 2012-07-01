@@ -31,6 +31,7 @@ instance Show SyncField where
 -- | Condition on query, containts tables affected, condition string with placeholders ('?') and arguments
 data Condition = Condition {
 	conditionTablesAffected :: [String],
+	conditionFieldsAffected :: [String],
 	conditionString :: String,
 	conditionArguments :: [Action] }
 		deriving (Show)

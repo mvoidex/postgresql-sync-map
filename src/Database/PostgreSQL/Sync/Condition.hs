@@ -12,16 +12,21 @@ import Data.List
 import Data.Monoid
 import Data.Maybe
 import qualified Data.Map as M
+import Data.Char
 import Data.Either
 import Database.PostgreSQL.Sync.Base
 import Database.PostgreSQL.Sync.Types
 import Database.PostgreSQL.Simple.ToField (Action(..), ToField(..))
 
 instance Monoid Condition where
-    mempty = Condition [] "" []
-    mappend (Condition [] "" []) r = r
-    mappend l (Condition [] "" []) = l
-    mappend (Condition tl sl al) (Condition tr sr ar) = Condition (nub $ tl ++ tr) (sl ++ " and " ++ sr) (al ++ ar)
+    mempty = Condition [] [] "" []
+    mappend (Condition [] [] "" []) r = r
+    mappend l (Condition [] [] "" []) = l
+    mappend (Condition tl fl sl al) (Condition tr fr sr ar) = Condition
+        (nub $ tl ++ tr)
+        (nub $ fl ++ fr)
+        (sl ++ " and " ++ sr)
+        (al ++ ar)
 
 toWhere :: Condition -> String
 toWhere c
@@ -34,8 +39,9 @@ affects tables cond = all (`elem` tables) $ conditionTablesAffected cond
 
 -- | Create condition from string
 condition :: Syncs -> String -> [Action] -> Condition
-condition ss s args = Condition tables str args where
+condition ss s args = Condition tables fields' str args where
 	tables = nub $ map fst $ lefts fields
+	fields' = nub $ map (\(t, n) -> t ++ "." ++ n) $ lefts fields
 	str = concatMap (either (\(t, n) -> t ++ "." ++ n) id) fields
 
 	swords = words s
@@ -53,5 +59,6 @@ syncsField ss model name = fmap (\s -> condField s name) $ M.lookup model (syncs
 
 -- | Parse field "model.name" to table-related field "table.column" or "table.garbage -> 'name'"
 parseField :: Syncs -> String -> Maybe (String, String)
-parseField ss mname = syncsField ss model name where
+parseField ss mname = if valid then syncsField ss model name else Nothing where
 	(model, name) = second (drop 1) $ break (== '.') mname
+	valid = all (not . isSpace) name
