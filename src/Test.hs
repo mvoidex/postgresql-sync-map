@@ -19,6 +19,7 @@ import Database.PostgreSQL.Simple.FromRow (FromRow)
 import Database.PostgreSQL.Simple.ToField
 import Database.PostgreSQL.Syncs
 import Database.PostgreSQL.Report
+import Database.PostgreSQL.Report.Xlsx
 import Data.Maybe
 import Data.Function
 import Data.String
@@ -136,7 +137,11 @@ run = do
         ("reportc", takt $ do
             r <- reportcIO
             rs <- transaction con $ generate r
-            mapM_ putStrLn $ map (intercalate " | " . map show) rs)]
+            mapM_ putStrLn $ map (intercalate " | " . map show) rs),
+        ("run-report", takt $ do
+            f <- getLine
+            t <- getLine
+            transaction con $ createReport tests f t)]
     where
         intIO :: IO Int
         intIO = putStrLn "index:" >> (getLine >>= readIO)

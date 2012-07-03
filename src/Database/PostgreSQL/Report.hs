@@ -46,10 +46,20 @@ report ss fs cs = Report ts pfs (cs ++ syncsRelations ss) where
 -- 2. model.name > 10 - field and condition in one place
 reportc :: Syncs -> [String] -> Report
 reportc ss fs = Report ts pfs (cs ++ syncsRelations ss) where
+    -- TODO: Very dirty! Need rewrite!
+    pfs = map parseField' fs
+
     fs' = mapMaybe (parseField ss) fs
     ts = nub $ map fst fs' ++ concatMap conditionTablesAffected cs
-    pfs = map (\(t, n) -> t ++ "." ++ n) fs' ++ concatMap conditionFieldsAffected cs
+    -- pfs = map (\(t, n) -> t ++ "." ++ n) fs' ++ concatMap conditionFieldsAffected cs
     cs = mapMaybe toC fs
+
+    parseField' s = case parseField ss s of
+        Nothing -> tryHead $ conditionFieldsAffected $ condition ss s []
+        Just (t, n) -> t ++ "." ++ n
+
+    tryHead [x] = x
+    tryHead _ = error "Condition must use only one field"
 
     toC s = case parseField ss s of
         Nothing -> Just $ condition ss s []
