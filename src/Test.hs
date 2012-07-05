@@ -38,10 +38,23 @@ test2 = sync "test2" "garbage" [
     field "car"  "car"     string,
     field "age"  "age"     int]
 
+caseModel :: Sync
+caseModel = sync "casetbl" "garbage" [
+    field_ "id" int,
+--  S.field_ "car_make" S.string,
+--  S.field_ "car_program" S.string,
+--  S.field_ "car_vin" S.string,
+--  S.field_ "car_buyDate" S.time,
+--  S.field_ "callDate" S.time,
+    field_ "callTaker" string,
+    field_ "callerOwner" int,
+    field_ "caller_name" string]
+
 tests :: Syncs
 tests = syncs [
     ("test", test),
-    ("test2", test2)] [
+    ("test2", test2),
+    ("case", caseModel)] [
     "test.x = test2.id"]
 
 testMap :: SyncMap
@@ -105,27 +118,30 @@ run :: IO ()
 run = do
     con <- connect local
     elog $ void $ execute_ con "create extension hstore"
-    elog $ void $ execute_ con "drop table test"
-    elog $ void $ execute_ con "drop table test2"
-    transaction con $ create tests
-    transaction con $ insert tests "test" testMap
-    transaction con $ insert tests "test" testMap2
-    transaction con $ insert tests "test2" test2Map
-    transaction con $ insert tests "test2" test2Map2
+    elog $ void $ transaction con $ create tests
+    --transaction con $ insert tests "test" testMap
+    --transaction con $ insert tests "test" testMap2
+    --transaction con $ insert tests "test2" test2Map
+    --transaction con $ insert tests "test2" test2Map2
     process [
         ("quit", stop),
+        ("drop", takt $ do
+            tbl <- getLine
+            elog $ void $ execute_ con (fromString $ "drop table " ++ tbl)),
         ("insert", takt $ do
-            i <- intIO
+            w <- modelIO
             m <- dataIO
-            transaction con $ insert tests "test" m),
+            transaction con $ insert tests w m),
         ("select", takt $ do
+            w <- modelIO
             i <- intIO
-            m <- transaction con $ select tests "test" (condition tests "test.id = ?" [toField i])
+            m <- transaction con $ select tests w (condition tests "test.id = ?" [toField i])
             print m),
         ("update", takt $ do
+            w <- modelIO
             i <- intIO
             m <- dataIO
-            transaction con $ update tests "test" (condition tests "test.id = ?" [toField i]) m),
+            transaction con $ update tests w (condition tests "test.id = ?" [toField i]) m),
         ("execute", takt $ do
             q <- queryIO
             anys <- elogq $ query_ con (fromString q)
@@ -143,6 +159,8 @@ run = do
             t <- getLine
             transaction con $ createReport tests f t)]
     where
+        modelIO :: IO String
+        modelIO = putStrLn "model:" >> getLine
         intIO :: IO Int
         intIO = putStrLn "index:" >> (getLine >>= readIO)
         dataIO :: IO SyncMap

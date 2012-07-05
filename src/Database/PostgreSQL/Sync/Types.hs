@@ -84,6 +84,7 @@ instance FromField SyncMap where
 escapeHStore :: ByteString -> ByteString
 escapeHStore b
     | C8.any (`elem` "'") b = error "HStore keys and values can't contain single quotes"
+    | C8.null b = C8.pack "\"\""
     | C8.all (\c -> isDigit c || isAlpha c) b = b
     | C8.all (\c -> isDigit c || isAlpha c || (c `elem` " \"")) b = escaped b
     | otherwise = error $ "HStore key or value has invalid value: " ++ show b

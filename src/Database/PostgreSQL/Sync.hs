@@ -18,7 +18,7 @@
 -- @
 module Database.PostgreSQL.Sync (
     sync,
-    field,
+    field, field_,
     store,
     load,
 
@@ -59,6 +59,10 @@ sync = Sync
 -- | Connect field
 field :: String -> String -> Type -> SyncField
 field k c t = SyncField k c t
+
+-- | Connect field without renaming
+field_ :: String -> Type -> SyncField
+field_ k = field k k
 
 -- | Store Map in postgresql
 store :: Sync -> SyncMap -> Either String (M.Map String Action)

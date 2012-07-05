@@ -11,12 +11,14 @@ module Database.PostgreSQL.Syncs (
 
 	module Database.PostgreSQL.Sync.Base,
 	module Database.PostgreSQL.Sync.Types,
-	module Database.PostgreSQL.Sync.Condition
+	module Database.PostgreSQL.Sync.Condition,
+	module Database.PostgreSQL.Sync
 	) where
 
 import Control.Arrow
 import Database.PostgreSQL.Sync hiding (create, insert, select, update)
 import Database.PostgreSQL.Sync.Base
+import Database.PostgreSQL.Sync hiding (create, insert, select, update)
 import qualified Database.PostgreSQL.Sync as S
 import Database.PostgreSQL.Sync.Types
 import Database.PostgreSQL.Sync.Condition
