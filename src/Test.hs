@@ -45,7 +45,7 @@ caseModel = sync "casetbl" "garbage" [
 --  S.field_ "car_program" S.string,
 --  S.field_ "car_vin" S.string,
 --  S.field_ "car_buyDate" S.time,
---  S.field_ "callDate" S.time,
+    field_ "callDate" time,
     field_ "callTaker" string,
     field_ "callerOwner" int,
     field_ "caller_name" string]

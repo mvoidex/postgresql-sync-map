@@ -112,7 +112,7 @@ create s@(Sync tbl hs cons) = do
         putStrLn $ "has table " ++ tbl ++ "?"
         hasTable <- E.catch (tt qcheck (execute_ con qcheck) >> return True) (sqlError False)
         putStrLn $ if hasTable then "yes" else "no"
-        unless hasTable $ do
+        unless hasTable $ elog $ do
             putStrLn "creating table"
             tt qcreate (execute_ con qcreate)
             putStrLn "commiting"
@@ -127,6 +127,10 @@ create s@(Sync tbl hs cons) = do
             map asType cons,
             [hs ++ " hstore"]]
         asType (SyncField _ c t) = unwords [c, typeCreateString t]
+        elog :: IO () -> IO ()
+        elog act = E.catch act onError where
+            onError :: E.SomeException -> IO ()
+            onError e = putStrLn $ "Failed with: " ++ show e
 
 -- | Insert Map into postgresql
 insert :: Sync -> SyncMap -> TIO ()
