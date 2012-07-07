@@ -97,6 +97,8 @@ ttt q v a = do
     -- f <- formatQuery undefined q v
     Debug.traceShow q $ Debug.traceShow v a
 
+errort s = Debug.trace s $ error s
+
 newtype TIO a = TIO (ReaderT Connection IO a)
     deriving (Monad, Functor, Applicative, MonadIO)
 
@@ -141,7 +143,7 @@ insert s@(Sync tbl _ _) m = connection >>= insert' where
             cols = intercalate ", " $ M.keys m'
             qms = intercalate ", " $ replicate (M.size m') "?"
             v = M.elems m'
-        onError str = error $ "Unable to insert data: " ++ str
+        onError str = errort $ "Unable to insert data: " ++ str
 
 -- | Select row by condition
 select :: Sync -> Condition -> TIO SyncMap
@@ -151,8 +153,8 @@ select s@(Sync tbl g rs) cond = connection >>= select' where
         cols = intercalate ", " $ (map syncColumn rs ++ [g])
         zipCols = M.fromList . zip (map syncColumn rs ++ [g])
         getHead [x] = return x
-        getHead xs = error $ "Expected one row, returned " ++ show (length xs) ++ " rows"
-        onError str = error $ "Unable to convert data on select: " ++ str
+        getHead xs = errort $ "Expected one row, returned " ++ show (length xs) ++ " rows"
+        onError str = errort $ "Unable to convert data on select: " ++ str
 
 -- | Update by condition with values, stored in map
 update :: Sync -> Condition -> SyncMap -> TIO ()
@@ -161,12 +163,12 @@ update s@(Sync tbl g _) cond m = connection >>= update' where
         onUpdate m' = ttt q v $ execute con q v where
             q = fromString $ "update " ++ tbl ++ " set " ++ cols ++ toWhere cond
             cols = intercalate ", " $ map updater $ M.keys m'
-            updater v
+            updater vv
                 -- FIXME: dirty
-                | v == g = g ++ " = " ++ g ++ " || ?"
-                | otherwise = v ++ " = ?"
+                | vv == g = g ++ " = " ++ g ++ " || ?"
+                | otherwise = vv ++ " = ?"
             v = M.elems m' ++ conditionArguments cond
-        onError str = error $ "Unable to update data: " ++ str
+        onError str = errort $ "Unable to update data: " ++ str
 
 -- | Transaction
 transaction :: Connection -> TIO a -> IO a

@@ -26,6 +26,8 @@ import Database.PostgreSQL.Simple.ToField
 import qualified Data.Map as M
 import Data.Time.Clock.POSIX
 
+import Debug.Trace as Debug
+
 type SyncMap = M.Map ByteString ByteString
 
 data FieldType = IntType | DoubleType | BoolType | StringType | TimeType | HStoreType
@@ -81,13 +83,17 @@ instance FromField SyncMap where
                 check (l, r) = fmap ((,) l) r
         -- parse = M.fromList . map (C8.breakSubstring (fromString "=>") >>> (trimq *** (trimq . C8.drop 2))) . C8.split ','
 
+errort s = Debug.trace s $ error s
+
+commonCh c = isDigit c || isAlpha c || (c `elem` "_-+")
+
 escapeHStore :: ByteString -> ByteString
 escapeHStore b
-    | C8.any (`elem` "'") b = error "HStore keys and values can't contain single quotes"
+    | C8.any (`elem` "'") b = errort "HStore keys and values can't contain single quotes"
     | C8.null b = C8.pack "\"\""
-    | C8.all (\c -> isDigit c || isAlpha c) b = b
-    | C8.all (\c -> isDigit c || isAlpha c || (c `elem` " \"")) b = escaped b
-    | otherwise = error $ "HStore key or value has invalid value: " ++ show b
+    | C8.all commonCh b = b
+    | C8.all (\c -> commonCh c || (c `elem` " \"")) b = escaped b
+    | otherwise = errort $ "HStore key or value has invalid value: " ++ show b
 
 escaped = C8.cons '"' . (`C8.snoc` '"') . C8.intercalate (C8.pack "\\\"") . C8.split '"'
 
