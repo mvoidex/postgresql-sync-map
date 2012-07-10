@@ -14,6 +14,7 @@ import Data.Maybe
 import qualified Data.Map as M
 import Data.Char
 import Data.Either
+import qualified Data.Text as T
 import Database.PostgreSQL.Sync.Base
 import Database.PostgreSQL.Sync.Types
 import Database.PostgreSQL.Simple.ToField (Action(..), ToField(..))
@@ -52,7 +53,7 @@ condition ss s args = Condition tables fields' str args where
 condField :: Sync -> String -> (String, String)
 condField (Sync t h cs) name = case find ((== name) . syncKey) cs of
     (Just (SyncField k c _)) -> (t, c)
-    Nothing -> (t, h ++ " -> '" ++ C8.unpack (escapeHStore (C8.pack name)) ++ "'")
+    Nothing -> (t, h ++ " -> '" ++ T.unpack (escapeHStore (T.pack name)) ++ "'")
 
 syncsField :: Syncs -> String -> String -> Maybe (String, String)
 syncsField ss model name = fmap (\s -> condField s name) $ M.lookup model (syncsSyncs ss)

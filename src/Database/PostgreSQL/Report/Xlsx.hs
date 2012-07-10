@@ -82,7 +82,9 @@ fieldValueToCell (BoolValue i) = cell $ Xlsx.CellText $ T.pack $ show i
 fieldValueToCell (StringValue i) = cell $ Xlsx.CellText $ T.pack i
 fieldValueToCell (TimeValue i) = cell $ Xlsx.CellLocalTime $ toLocalTime i where
 	toLocalTime = utcToLocalTime utc . posixSecondsToUTCTime
-fieldValueToCell (HStoreValue i) = error "HStore can't be in one cell"
+fieldValueToCell (HStoreValue i)
+	| M.null i = cell $ Xlsx.CellText $ T.empty
+	| otherwise = error $ "HStore can't be in one cell: " ++ show i
 
 cell :: Xlsx.CellValue -> Xlsx.CellData
 cell = Xlsx.CellData Nothing . Just

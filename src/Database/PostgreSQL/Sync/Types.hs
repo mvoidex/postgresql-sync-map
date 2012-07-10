@@ -6,7 +6,7 @@ module Database.PostgreSQL.Sync.Types (
     Type(..),
     typeType, valueType,
     valueToSyncMap,
-    escapeHStore,
+    escapeHStore, escapeHStoreBS,
     valueToAction,
     int, double, bool, string, time,
     
@@ -19,6 +19,8 @@ import Control.Arrow
 import Data.Char
 import Data.List
 import Data.String
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as C8
 import Database.PostgreSQL.Simple.FromField
@@ -85,17 +87,20 @@ instance FromField SyncMap where
 
 errort s = Debug.trace s $ error s
 
-commonCh c = isDigit c || isAlpha c || (c `elem` "_-+")
+commonCh c = isDigit c || isAlpha c || (c `elem` "_-+.,:;()[]{}?!")
 
-escapeHStore :: ByteString -> ByteString
+escapeHStore :: T.Text -> T.Text
 escapeHStore b
-    | C8.any (`elem` "'") b = errort "HStore keys and values can't contain single quotes"
-    | C8.null b = C8.pack "\"\""
-    | C8.all commonCh b = b
-    | C8.all (\c -> commonCh c || (c `elem` " \"")) b = escaped b
-    | otherwise = errort $ "HStore key or value has invalid value: " ++ show b
+    | T.any (`elem` "'") b = errort "HStore keys and values can't contain single quotes"
+    | T.null b = T.pack "\"\""
+    | T.all commonCh b = b
+    | T.all (\c -> commonCh c || (c `elem` " \"")) b = escaped b
+    | otherwise = errort $ "HStore key or value has invalid value: " ++ T.unpack b
 
-escaped = C8.cons '"' . (`C8.snoc` '"') . C8.intercalate (C8.pack "\\\"") . C8.split '"'
+escapeHStoreBS :: ByteString -> ByteString
+escapeHStoreBS = T.encodeUtf8 . escapeHStore . T.decodeUtf8
+
+escaped = T.cons '"' . (`T.snoc` '"') . T.intercalate (T.pack "\\\"") . T.split (== '"')
 
 instance ToField SyncMap where
     toField = Many . plainQuote . intersperse (plain ", ") . map hstoredValue . M.toList where
@@ -103,7 +108,7 @@ instance ToField SyncMap where
         plainQuote = ([plain "'"] ++) . (++ [plain "'"])
         -- | TODO: Escape!
         hstoredValue (k, v) = Many [byteString k, plain "=>", byteString v] where
-            byteString b = Plain (fromByteString $ escapeHStore b)
+            byteString b = Plain (fromByteString $ escapeHStoreBS b)
             --    | C8.any (`elem` "'") b = error "HStore keys and values can't contain single quotes"
             --    | C8.all (\c -> isDigit c || isAlpha c) b = Plain (fromByteString b)
             --    | C8.all (\c -> isDigit c || isAlpha c || (c `elem` " \"")) b = Plain (fromByteString $ escaped b)
@@ -114,12 +119,12 @@ instance ToField SyncMap where
 instance FromField FieldValue where
     fromField f d = foldr1 (<|>) tries where
         tries = [
-            HStoreValue <$> fromField f d,
+            (TimeValue . utcTimeToPOSIXSeconds) <$> fromField f d,
             IntValue <$> fromField f d,
             DoubleValue <$> fromField f d,
             BoolValue <$> fromField f d,
-            (TimeValue . utcTimeToPOSIXSeconds) <$> fromField f d,
-            StringValue <$> fromField f d]
+            StringValue <$> fromField f d,
+            HStoreValue <$> fromField f d]
 
 -- | Type of column
 data Type = Type {

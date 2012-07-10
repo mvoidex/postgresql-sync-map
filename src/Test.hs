@@ -17,7 +17,7 @@ import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.FromField
 import Database.PostgreSQL.Simple.FromRow (FromRow)
 import Database.PostgreSQL.Simple.ToField
-import Database.PostgreSQL.Syncs
+import Database.PostgreSQL.Syncs as S
 import Database.PostgreSQL.Report
 import Database.PostgreSQL.Report.Xlsx
 import Data.Maybe
@@ -39,16 +39,23 @@ test2 = sync "test2" "garbage" [
     field "age"  "age"     int]
 
 caseModel :: Sync
-caseModel = sync "casetbl" "garbage" [
-    field_ "id" int,
---  S.field_ "car_make" S.string,
---  S.field_ "car_program" S.string,
---  S.field_ "car_vin" S.string,
---  S.field_ "car_buyDate" S.time,
-    field_ "callDate" time,
-    field_ "callTaker" string,
-    field_ "callerOwner" int,
-    field_ "caller_name" string]
+caseModel = S.sync "casetbl" "garbage" [
+    S.field_ "id" S.int,
+    S.field_ "car_make" S.string,
+    S.field_ "car_program" S.string,
+    S.field_ "car_vin" S.string,
+    S.field_ "car_buyDate" S.time,
+    S.field_ "car_plateNum" S.string,
+    S.field_ "car_carModel" S.string,
+    S.field_ "caseAddress_address" S.string,
+    S.field_ "callDate" S.time,
+    S.field_ "callTaker" S.string,
+    S.field_ "callerOwner" S.int,
+    S.field_ "caller_name" S.string,
+    S.field_ "program" S.string,
+    S.field_ "services" S.string,
+    S.field_ "owner_name" S.string,
+    S.field_ "partner_name" S.string]
 
 tests :: Syncs
 tests = syncs [

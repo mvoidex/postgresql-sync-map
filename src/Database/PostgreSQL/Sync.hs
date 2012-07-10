@@ -99,6 +99,16 @@ ttt q v a = do
 
 errort s = Debug.trace s $ error s
 
+elog :: IO () -> IO ()
+elog act = E.catch act onError where
+    onError :: E.SomeException -> IO ()
+    onError e = putStrLn $ "Failed with: " ++ show e
+
+elogt :: IO a -> IO a
+elogt act = E.catch act onError where
+    onError :: E.SomeException -> IO a
+    onError e = putStrLn ("Failed with: " ++ show e) >> E.throwIO e
+
 newtype TIO a = TIO (ReaderT Connection IO a)
     deriving (Monad, Functor, Applicative, MonadIO)
 
@@ -129,16 +139,12 @@ create s@(Sync tbl hs cons) = do
             map asType cons,
             [hs ++ " hstore"]]
         asType (SyncField _ c t) = unwords [c, typeCreateString t]
-        elog :: IO () -> IO ()
-        elog act = E.catch act onError where
-            onError :: E.SomeException -> IO ()
-            onError e = putStrLn $ "Failed with: " ++ show e
 
 -- | Insert Map into postgresql
 insert :: Sync -> SyncMap -> TIO ()
 insert s@(Sync tbl _ _) m = connection >>= insert' where
     insert' con = liftIO $ void $ either onError onStore $ store s m where
-        onStore m' = ttt q v $ execute con q v where
+        onStore m' = ttt q v $ elogt $ execute con q v where
             q = fromString $ "insert into " ++ tbl ++ " (" ++ cols ++ ") values (" ++ qms ++ ")"
             cols = intercalate ", " $ M.keys m'
             qms = intercalate ", " $ replicate (M.size m') "?"
@@ -148,7 +154,7 @@ insert s@(Sync tbl _ _) m = connection >>= insert' where
 -- | Select row by condition
 select :: Sync -> Condition -> TIO SyncMap
 select s@(Sync tbl g rs) cond = connection >>= select' where
-    select' con = liftIO $ ttt q (conditionArguments cond) (query con q (conditionArguments cond)) >>= getHead >>= either onError return . load s . zipCols where
+    select' con = liftIO $ ttt q (conditionArguments cond) (elogt $ query con q (conditionArguments cond)) >>= getHead >>= either onError return . load s . zipCols where
         q = fromString $ "select " ++ cols ++ " from " ++ tbl ++ toWhere cond
         cols = intercalate ", " $ (map syncColumn rs ++ [g])
         zipCols = M.fromList . zip (map syncColumn rs ++ [g])
@@ -160,7 +166,7 @@ select s@(Sync tbl g rs) cond = connection >>= select' where
 update :: Sync -> Condition -> SyncMap -> TIO ()
 update s@(Sync tbl g _) cond m = connection >>= update' where
     update' con = liftIO $ void $ either onError onUpdate $ store s m where
-        onUpdate m' = ttt q v $ execute con q v where
+        onUpdate m' = ttt q v $ elogt $ execute con q v where
             q = fromString $ "update " ++ tbl ++ " set " ++ cols ++ toWhere cond
             cols = intercalate ", " $ map updater $ M.keys m'
             updater vv
