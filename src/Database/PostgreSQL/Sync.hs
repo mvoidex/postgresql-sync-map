@@ -18,13 +18,13 @@
 -- @
 module Database.PostgreSQL.Sync (
     sync,
-    field, field_,
+    field, field_, indexed,
     store,
     load,
 
     TIO, connection,
     create,
-    insert, select, update,
+    insert, select, exists, update, insertUpdate,
     transaction, inPG,
     
     module Database.PostgreSQL.Sync.Base,
@@ -58,11 +58,15 @@ sync = Sync
 
 -- | Connect field
 field :: String -> String -> Type -> SyncField
-field k c t = SyncField k c t
+field k c t = SyncField k c False t
 
 -- | Connect field without renaming
 field_ :: String -> Type -> SyncField
 field_ k = field k k
+
+-- | Make field indexed
+indexed :: SyncField -> SyncField
+indexed f = f { syncIndexed = True }
 
 -- | Store Map in postgresql
 store :: Sync -> SyncMap -> Either String (M.Map String Action)
@@ -74,7 +78,7 @@ store (Sync tbl g cs) = fmap M.fromList . toActions . M.toList where
             return ((g, hstored') : cols')
     hasColumn (k, _) = any ((== k) . C8.pack . syncKey) cs
     toAction (k, v) = do
-        (SyncField k' c' t') <- maybe (Left $ "Unable to find key " ++ C8.unpack k) return $ find ((== k) . C8.pack . syncKey) cs
+        (SyncField k' c' _ t') <- maybe (Left $ "Unable to find key " ++ C8.unpack k) return $ find ((== k) . C8.pack . syncKey) cs
         v' <- valueToAction t' v
         return (c', v')
 
@@ -86,7 +90,7 @@ load (Sync tbl g cs) = fmap mconcat . mapM fromFieldValue . M.toList where
             HStoreValue m -> Right m
             _ -> Left "Invalid type, must be hstore"
         | otherwise = do
-            (SyncField k' c' t') <- maybe (Left $ "Unable to find column " ++ c) return $ find ((== c) . syncColumn) cs
+            (SyncField k' c' _ t') <- maybe (Left $ "Unable to find column " ++ c) return $ find ((== c) . syncColumn) cs
             if typeType t' /= valueType v
                 then Left ("Type mismatching, need type " ++ show (typeType t') ++ ", got " ++ show (valueType v))
                 else Right $ valueToSyncMap k' v
@@ -127,6 +131,8 @@ create s@(Sync tbl hs cons) = do
         unless hasTable $ elog $ do
             putStrLn "creating table"
             tt qcreate (execute_ con qcreate)
+            putStrLn "creating indices"
+            forM_ cons (createIndex con)
             putStrLn "commiting"
             commit con
     where
@@ -138,7 +144,10 @@ create s@(Sync tbl hs cons) = do
         cols = concat [
             map asType cons,
             [hs ++ " hstore"]]
-        asType (SyncField _ c t) = unwords [c, typeCreateString t]
+        asType (SyncField _ c _ t) = unwords [c, typeCreateString t]
+        createIndex _ (SyncField _ c False _) = return ()
+        createIndex con (SyncField _ c True _) = elog $ void $ tt qindex (execute_ con qindex) where
+            qindex = fromString $ "create index " ++ c ++ "_index on " ++ tbl ++ " (" ++ c ++ ")"
 
 -- | Insert Map into postgresql
 insert :: Sync -> SyncMap -> TIO ()
@@ -162,6 +171,14 @@ select s@(Sync tbl g rs) cond = connection >>= select' where
         getHead xs = errort $ "Expected one row, returned " ++ show (length xs) ++ " rows"
         onError str = errort $ "Unable to convert data on select: " ++ str
 
+-- | Exists rows with condition
+exists :: Sync -> Condition -> TIO Bool
+exists s@(Sync tbl g rs) cond = connection >>= exists' where
+    exists' con = liftIO $ ttt q (conditionArguments cond) (elogt $ query con q (conditionArguments cond)) >>= getHead >>= return . fromOnly where
+        q = fromString $ "select count(*) > 0 from " ++ tbl ++ toWhere cond
+        getHead [x] = return x
+        getHead xs = errort $ "Impossible happened, count must return one row"
+
 -- | Update by condition with values, stored in map
 update :: Sync -> Condition -> SyncMap -> TIO ()
 update s@(Sync tbl g _) cond m = connection >>= update' where
@@ -175,6 +192,16 @@ update s@(Sync tbl g _) cond m = connection >>= update' where
                 | otherwise = vv ++ " = ?"
             v = M.elems m' ++ conditionArguments cond
         onError str = errort $ "Unable to update data: " ++ str
+
+-- | Insert if not exists, update otherwise
+-- Returns True on update
+insertUpdate :: Sync -> Condition -> SyncMap -> TIO Bool
+insertUpdate s cond m = do
+    e <- exists s cond
+    if e
+        then update s cond m
+        else insert s m
+    return (not e)
 
 -- | Transaction
 transaction :: Connection -> TIO a -> IO a

@@ -40,18 +40,23 @@ test2 = sync "test2" "garbage" [
 
 caseModel :: Sync
 caseModel = S.sync "casetbl" "garbage" [
-    S.field_ "id" S.int,
-    S.field_ "car_make" S.string,
-    S.field_ "car_program" S.string,
-    S.field_ "car_vin" S.string,
+    S.indexed $ S.field_ "id" S.int,
+    S.indexed $ S.field_ "car_make" S.string,
+    S.indexed $ S.field_ "car_model" S.string,
+    S.indexed $ S.field_ "car_program" S.string,
+    S.indexed $ S.field_ "car_vin" S.string,
     S.field_ "car_buyDate" S.time,
     S.field_ "car_plateNum" S.string,
     S.field_ "car_carModel" S.string,
+    S.indexed $ S.field_ "diagnosis1" S.string,
+    S.indexed $ S.field_ "diagnosis2" S.string,
+    S.indexed $ S.field_ "dealerCause" S.string,
     S.field_ "caseAddress_address" S.string,
-    S.field_ "callDate" S.time,
+    S.indexed $ S.field_ "callDate" S.time,
     S.field_ "callTaker" S.string,
     S.field_ "callerOwner" S.int,
     S.field_ "caller_name" S.string,
+    S.indexed $ S.field_ "comment" S.string,
     S.field_ "program" S.string,
     S.field_ "services" S.string,
     S.field_ "owner_name" S.string,
@@ -99,7 +104,7 @@ local = ConnectInfo {
     connectHost = "localhost",
     connectPort = 5432,
     connectUser = "postgres",
-    connectPassword = "2741001",
+    connectPassword = "pass",
     connectDatabase = "postgres" }
 
 elog :: IO () -> IO ()
@@ -113,6 +118,13 @@ elogq act = E.catch act onError where
     onError e = do
         putStrLn $ "Failed with: " ++ show e
         return []
+
+elogi :: (Num a) => IO a -> IO a
+elogi act = E.catch act onError where
+    onError :: (Num b) => E.SomeException -> IO b
+    onError e = do
+        putStrLn $ "Failed with " ++ show e
+        return 0
 
 data AnyValue = AnyValue { toAnyValue ::ByteString }
     deriving (Eq, Ord, Read, Show)
@@ -153,6 +165,10 @@ run = do
             q <- queryIO
             anys <- elogq $ query_ con (fromString q)
             mapM_ putStrLn $ map (intercalate " | " . map (C8.unpack . toAnyValue)) anys),
+        ("execute_", takt $ do
+            q <- queryIO
+            i <- elogi $ execute_ con (fromString q)
+            putStrLn $ "rows affected: " ++ show i),
         ("report", takt $ do
             r <- reportIO
             rs <- transaction con $ generate r

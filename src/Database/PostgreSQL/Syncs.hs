@@ -1,13 +1,8 @@
 module Database.PostgreSQL.Syncs (
-	sync, syncs,
-	field,
-	store,
-	load,
+	syncs,
 
-	TIO, connection,
 	create,
-	insert, select, update,
-	transaction,
+	insert, select, exists, update, insertUpdate,
 
 	module Database.PostgreSQL.Sync.Base,
 	module Database.PostgreSQL.Sync.Types,
@@ -16,9 +11,8 @@ module Database.PostgreSQL.Syncs (
 	) where
 
 import Control.Arrow
-import Database.PostgreSQL.Sync hiding (create, insert, select, update)
+import Database.PostgreSQL.Sync hiding (create, insert, select, exists, update, insertUpdate)
 import Database.PostgreSQL.Sync.Base
-import Database.PostgreSQL.Sync hiding (create, insert, select, update)
 import qualified Database.PostgreSQL.Sync as S
 import Database.PostgreSQL.Sync.Types
 import Database.PostgreSQL.Sync.Condition
@@ -45,6 +39,15 @@ insert ss name m = withModel ss name $ \s -> S.insert s m
 select :: Syncs -> String -> Condition -> TIO SyncMap
 select ss name c = withModel ss name $ \s -> S.select s c
 
+-- | Exists tows with condition
+exists :: Syncs -> String -> Condition -> TIO Bool
+exists ss name c = withModel ss name $ \s -> S.exists s c
+
 -- | Update by condition with values, stored in map
 update :: Syncs -> String -> Condition -> SyncMap -> TIO ()
 update ss name c m = withModel ss name $ \s -> S.update s c m
+
+-- | Insert if not exists, update otherwise
+-- Returns True on update
+insertUpdate :: Syncs -> String -> Condition -> SyncMap -> TIO Bool
+insertUpdate ss name c m = withModel ss name $ \s -> S.insertUpdate s c m

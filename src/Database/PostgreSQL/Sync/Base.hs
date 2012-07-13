@@ -18,6 +18,7 @@ data Sync = Sync {
 data SyncField = SyncField {
     syncKey :: String,                 -- ^ Key in Map
     syncColumn :: String,              -- ^ Column name in database
+    syncIndexed :: Bool,
     syncType :: Type }                 -- ^ Type of value or reference to table
 
 -- | Syncs table
@@ -26,7 +27,7 @@ data Syncs = Syncs {
 	syncsRelations :: [Condition] }
 
 instance Show SyncField where
-    show (SyncField k c (Type st _ _)) = unwords [k, "<->", c, "::", show st]
+    show (SyncField k c i (Type st _ _)) = unwords [k, "<->", c, "::", show st, if i then "*" else ""]
 
 -- | Condition on query, containts tables affected, condition string with placeholders ('?') and arguments
 data Condition = Condition {

@@ -43,7 +43,8 @@ condition :: Syncs -> String -> [Action] -> Condition
 condition ss s args = Condition tables fields' str args where
 	tables = nub $ map fst $ lefts fields
 	fields' = nub $ map (\(t, n) -> t ++ "." ++ n) $ lefts fields
-	str = concatMap (either (\(t, n) -> t ++ "." ++ n) id) fields
+	-- TODO: Rewrite!
+	str = unwords $ map (either (\(t, n) -> t ++ "." ++ n) id) fields
 
 	swords = words s
 	fields = map (parseField' ss) swords
@@ -52,7 +53,7 @@ condition ss s args = Condition tables fields' str args where
 
 condField :: Sync -> String -> (String, String)
 condField (Sync t h cs) name = case find ((== name) . syncKey) cs of
-    (Just (SyncField k c _)) -> (t, c)
+    (Just (SyncField k c _ _)) -> (t, c)
     Nothing -> (t, h ++ " -> '" ++ T.unpack (escapeHStore (T.pack name)) ++ "'")
 
 syncsField :: Syncs -> String -> String -> Maybe (String, String)
