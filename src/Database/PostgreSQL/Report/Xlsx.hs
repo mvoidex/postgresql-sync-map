@@ -53,21 +53,22 @@ generateReport ss m dicts = generate (reportc ss m') dicts where
 	m' = map T.unpack $ map snd m
 
 saveReport :: FilePath -> [T.Text] -> [[FieldValue]] -> IO ()
-saveReport f ts fs = Xlsx.writeXlsx f [sheet] where
-	allRows = names : fs
-	names = map (StringValue . T.unpack) ts
-	sheet = Xlsx.Worksheet {
-		Xlsx.wsName = T.pack "report",
-		Xlsx.wsMinX = 1,
-		Xlsx.wsMaxX = 1 + length ts,
-		Xlsx.wsMinY = 1,
-		Xlsx.wsMaxY = 1 + length allRows,
-		Xlsx.wsColumns = [],
-		Xlsx.wsRowHeights = M.empty,
-		Xlsx.wsCells = cells }
-	cells = M.unions $ zipWith row [1..] allRows
-	row r rowData = M.unions $ zipWith (cell r) [1..] rowData
-	cell r c d = M.singleton (c, r) (fieldValueToCell d)
+saveReport f ts fs = getCurrentTimeZone >>= saveReport' where
+	saveReport' tz = Xlsx.writeXlsx f [sheet] where
+		allRows = names : fs
+		names = map (StringValue . T.unpack) ts
+		sheet = Xlsx.Worksheet {
+			Xlsx.wsName = T.pack "report",
+			Xlsx.wsMinX = 1,
+			Xlsx.wsMaxX = 1 + length ts,
+			Xlsx.wsMinY = 1,
+			Xlsx.wsMaxY = 1 + length allRows,
+			Xlsx.wsColumns = [],
+			Xlsx.wsRowHeights = M.empty,
+			Xlsx.wsCells = cells }
+		cells = M.unions $ zipWith row [1..] allRows
+		row r rowData = M.unions $ zipWith (cell r) [1..] rowData
+		cell r c d = M.singleton (c, r) (fieldValueToCell tz d)
 
 createReport :: Syncs -> M.Map String (M.Map String String) -> FilePath -> FilePath -> TIO ()
 createReport ss dicts from to = do
@@ -75,14 +76,14 @@ createReport ss dicts from to = do
 	fs <- generateReport ss reportDecl dicts
 	liftIO $ saveReport to (map fst reportDecl) fs
 
-fieldValueToCell :: FieldValue -> Xlsx.CellData
-fieldValueToCell (IntValue i) = cell $ Xlsx.CellText $ T.pack $ show i
-fieldValueToCell (DoubleValue i) = cell $ Xlsx.CellDouble i
-fieldValueToCell (BoolValue i) = cell $ Xlsx.CellText $ T.pack $ show i
-fieldValueToCell (StringValue i) = cell $ Xlsx.CellText $ T.pack i
-fieldValueToCell (TimeValue i) = cell $ Xlsx.CellLocalTime $ toLocalTime i where
-	toLocalTime = utcToLocalTime utc . posixSecondsToUTCTime
-fieldValueToCell (HStoreValue i)
+fieldValueToCell :: TimeZone -> FieldValue -> Xlsx.CellData
+fieldValueToCell _ (IntValue i) = cell $ Xlsx.CellText $ T.pack $ show i
+fieldValueToCell _ (DoubleValue i) = cell $ Xlsx.CellDouble i
+fieldValueToCell _ (BoolValue i) = cell $ Xlsx.CellText $ T.pack $ show i
+fieldValueToCell _ (StringValue i) = cell $ Xlsx.CellText $ T.pack i
+fieldValueToCell tz (TimeValue i) = cell $ Xlsx.CellLocalTime $ toLocalTime i where
+	toLocalTime = utcToLocalTime tz . posixSecondsToUTCTime
+fieldValueToCell _ (HStoreValue i)
 	| M.null i = cell $ Xlsx.CellText $ T.empty
 	| otherwise = error $ "HStore can't be in one cell: " ++ show i
 

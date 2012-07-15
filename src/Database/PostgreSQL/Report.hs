@@ -86,7 +86,7 @@ parseReportField ss field = fromMaybe (error "Impossible happenned in parseRepor
         where
             cond = condition ss field []
             noTables = null $ conditionTablesAffected cond
-    constanted = Just $ Report [] [ReportField (if null field then "null" else field) Nothing] []
+    constanted = Just $ Report [] [ReportField ("'" ++ field ++ "'") Nothing] []
 
     tryHead [x] = x
     tryHead _ = error "Condition must use exactly one field"
