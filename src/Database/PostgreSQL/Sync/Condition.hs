@@ -1,5 +1,6 @@
 module Database.PostgreSQL.Sync.Condition (
 	toWhere, affects,
+	conditionSimple,
 	condition, condField, syncsField, parseField,
 
 	module Database.PostgreSQL.Sync.Base
@@ -38,6 +39,10 @@ toWhere c
 affects :: [String] -> Condition -> Bool
 affects tables cond = all (`elem` tables) $ conditionTablesAffected cond
 
+-- | Create condition on one field and table
+conditionSimple :: String -> String -> (String -> String) -> [Action] -> Condition
+conditionSimple table field fcond acts = Condition [table] [field] (fcond (table ++ "." ++ field)) acts
+
 -- | Create condition from string
 condition :: Syncs -> String -> [Action] -> Condition
 condition ss s args = Condition tables fields' str args where
@@ -63,4 +68,4 @@ syncsField ss model name = fmap (\s -> condField s name) $ M.lookup model (syncs
 parseField :: Syncs -> String -> Maybe (String, String)
 parseField ss mname = if valid then syncsField ss model name else Nothing where
 	(model, name) = second (drop 1) $ break (== '.') mname
-	valid = all (not . isSpace) name
+	valid = all (\c -> isAlpha c || isDigit c || c `elem` "._") name

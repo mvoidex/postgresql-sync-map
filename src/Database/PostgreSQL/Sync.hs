@@ -95,11 +95,12 @@ load (Sync tbl g cs) = fmap mconcat . mapM fromFieldValue . M.toList where
                 then Left ("Type mismatching, need type " ++ show (typeType t') ++ ", got " ++ show (valueType v))
                 else Right $ valueToSyncMap k' v
 
-tt q a = Debug.traceShow q a
+--tt q a = Debug.traceShow q a
+tt q a = a
 
-ttt q v a = do
-    -- f <- formatQuery undefined q v
-    Debug.traceShow q $ Debug.traceShow v a
+--ttt q v a = do
+--    Debug.traceShow q $ Debug.traceShow v a
+ttt q v a = a
 
 errort s = Debug.trace s $ error s
 

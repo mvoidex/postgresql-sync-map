@@ -6,11 +6,14 @@ module Test (
     ) where
 
 import Control.Arrow
+import Control.Applicative
 import qualified Control.Exception as E
 import Control.Monad
 import Control.Monad.IO.Class
+import Data.Aeson
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as C8
+import qualified Data.ByteString.Lazy.Char8 as LC8
 import qualified Data.Map as M
 import Data.List (intercalate)
 import Database.PostgreSQL.Simple
@@ -18,11 +21,15 @@ import Database.PostgreSQL.Simple.FromField
 import Database.PostgreSQL.Simple.FromRow (FromRow)
 import Database.PostgreSQL.Simple.ToField
 import Database.PostgreSQL.Syncs as S
+import qualified Database.PostgreSQL.Models as SM
 import Database.PostgreSQL.Report
 import Database.PostgreSQL.Report.Xlsx
 import Data.Maybe
 import Data.Function
 import Data.String
+import qualified Data.Text as T
+import System.FilePath
+import System.Directory
 
 test :: Sync
 test = sync "test" "garbage" [
@@ -62,12 +69,52 @@ caseModel = S.sync "casetbl" "garbage" [
     S.field_ "owner_name" S.string,
     S.field_ "partner_name" S.string]
 
+serviceModel :: Sync
+serviceModel = S.sync "servicetbl" "garbage" [
+    S.field_ "id" S.int,
+    S.field_ "parentId" S.int,
+    S.field_ "status" S.string,
+    S.field_ "type" S.string,
+    S.field_ "falseCall" S.string,
+    S.field_ "towDealer_name" S.string,
+    S.field_ "orderNumber" S.int,
+    S.field_ "suburbanMilage" S.string,
+    S.field_ "warrantyCase" S.string,
+    S.field_ "times_repairEndDate" S.time,
+    S.field_ "times_factServiceStart" S.time,
+    S.field_ "times_factServiceEnd" S.time,
+    S.field_ "carProvidedFor" S.int,
+    S.field_ "hotelProvidedFor" S.int,
+    S.field_ "payment_limitedCost" S.int,
+    S.field_ "payment_partnerCost" S.int,
+    S.field_ "payType" S.string,
+    S.field_ "clientSatisfied" S.string]
+
+service :: String -> (String, SM.Model)
+service tp = (tp, mdl) where
+    mdl = SM.model tp serviceModel [
+        SM.constant "type" tp,
+        SM.adjustField "parentId" (drop 5) ("case:" ++)]
+
 tests :: Syncs
 tests = syncs [
-    ("test", test),
-    ("test2", test2),
-    ("case", caseModel)] [
-    "test.x = test2.id"]
+    ("case", caseModel),
+    ("service", serviceModel)] [
+    "case.id = service.parentId"]
+
+models :: SM.Models
+models = SM.models tests $ [
+    ("case", SM.model "case" caseModel [])] ++ map service [
+    "deliverCar",
+    "deliverParts",
+    "hotel",
+    "information",
+    "rent",
+    "sober",
+    "taxi",
+    "tech",
+    "towage",
+    "transportation"]
 
 testMap :: SyncMap
 testMap = M.fromList [
@@ -126,15 +173,59 @@ elogi act = E.catch act onError where
         putStrLn $ "Failed with " ++ show e
         return 0
 
-data AnyValue = AnyValue { toAnyValue ::ByteString }
+data AnyValue = AnyValue { toAnyValue :: ByteString }
     deriving (Eq, Ord, Read, Show)
 
 instance FromField AnyValue where
     fromField _ Nothing = return $ AnyValue C8.empty
     fromField _ (Just s) = return $ AnyValue s
 
+data KeyValue = KeyValue {
+    key :: T.Text,
+    value :: T.Text }
+        deriving (Show)
+
+data Dictionary = Dictionary {
+    entries :: [KeyValue] }
+        deriving (Show)
+
+instance FromJSON KeyValue where
+    parseJSON (Object v) = KeyValue <$> (v .: (T.pack "value")) <*> (v .: (T.pack "label"))
+
+instance FromJSON Dictionary where
+    parseJSON (Object v) = Dictionary <$> (v .: (T.pack "entries"))
+
+dictionary :: Dictionary -> M.Map String String
+dictionary = M.fromList . map ((T.unpack . key) &&& (T.unpack . value)) . entries
+
+loadMap :: FilePath -> IO (M.Map String String)
+loadMap = fmap (maybe M.empty dictionary) . loadDictionary
+
+loadMaps :: FilePath -> [String] -> IO (M.Map String (M.Map String String))
+loadMaps f ds = fmap M.fromList $ forM ds $ \d -> do
+    m <- loadMap (f </> (d ++ ".json"))
+    return (d, m)
+
+loadDictionary :: FilePath -> IO (Maybe Dictionary)
+loadDictionary f = fmap decode $ LC8.readFile f
+
+loadValue :: FilePath -> IO (Maybe Value)
+loadValue f = fmap decode $ LC8.readFile f
+
+loadDicts :: FilePath -> IO (M.Map String (M.Map String String))
+loadDicts cfg = do
+    files <- getDirectoryContents cfg
+    let dictNames = map (dropExtension . takeFileName) $ filter ((== ".json") . takeExtension) files
+    loadMaps cfg dictNames
+
+dicts :: M.Map String (M.Map String String)
+dicts = M.fromList [
+    ("programs", M.fromList [
+        ("lala", "LALA PROGRAM")])]
+
 run :: IO ()
 run = do
+    dicts <- loadDicts "/home/voidex/Documents/Projects/carma/srv/resources/site-config/dictionaries"
     con <- connect local
     elog $ void $ execute_ con "create extension hstore"
     elog $ void $ transaction con $ create tests
@@ -150,17 +241,18 @@ run = do
         ("insert", takt $ do
             w <- modelIO
             m <- dataIO
-            transaction con $ insert tests w m),
+            transaction con $ SM.insert models w m),
         ("select", takt $ do
             w <- modelIO
             i <- intIO
-            m <- transaction con $ select tests w (condition tests "test.id = ?" [toField i])
+            -- TODO: condition is not good function
+            m <- transaction con $ SM.select models w (condition tests (w ++ ".id = ?") [toField i])
             print m),
         ("update", takt $ do
             w <- modelIO
             i <- intIO
             m <- dataIO
-            transaction con $ update tests w (condition tests "test.id = ?" [toField i]) m),
+            transaction con $ SM.update models w (condition tests (w ++ ".id = ?") [toField i]) m),
         ("execute", takt $ do
             q <- queryIO
             anys <- elogq $ query_ con (fromString q)
@@ -171,16 +263,16 @@ run = do
             putStrLn $ "rows affected: " ++ show i),
         ("report", takt $ do
             r <- reportIO
-            rs <- transaction con $ generate r
+            rs <- transaction con $ generate r dicts
             mapM_ putStrLn $ map (intercalate " | " . map show) rs),
         ("reportc", takt $ do
             r <- reportcIO
-            rs <- transaction con $ generate r
+            rs <- transaction con $ generate r dicts
             mapM_ putStrLn $ map (intercalate " | " . map show) rs),
         ("run-report", takt $ do
             f <- getLine
             t <- getLine
-            transaction con $ createReport tests f t)]
+            transaction con $ createReport tests dicts f t)]
     where
         modelIO :: IO String
         modelIO = putStrLn "model:" >> getLine

@@ -1,6 +1,7 @@
 module Database.PostgreSQL.Sync.Base (
 	Sync(..), SyncField(..),
 	Syncs(..),
+	ModelConstraint(..), Model(..), Models(..),
 	Condition(..)
 	) where
 
@@ -25,6 +26,22 @@ data SyncField = SyncField {
 data Syncs = Syncs {
 	syncsSyncs :: M.Map String Sync,
 	syncsRelations :: [Condition] }
+
+-- | Constraint on model
+data ModelConstraint = ModelConstraint {
+	constraintFunction :: (SyncMap -> SyncMap,  SyncMap -> SyncMap),
+	constraintCondition :: (String -> Condition) }
+
+-- | Model based on sync
+data Model = Model {
+	modelName :: String,                      -- ^ Model name
+	modelSync :: Sync,                        -- ^ Base sync
+	modelConstraints :: [ModelConstraint] }   -- ^ Constraints on model
+
+data Models = Models {
+	-- Not good, need refactor, because all info already exists in modelsModels
+	modelsSyncs :: Syncs,
+	modelsModels :: M.Map String Model }
 
 instance Show SyncField where
     show (SyncField k c i (Type st _ _)) = unwords [k, "<->", c, "::", show st, if i then "*" else ""]

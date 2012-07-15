@@ -87,14 +87,14 @@ instance FromField SyncMap where
 
 errort s = Debug.trace s $ error s
 
-commonCh c = isDigit c || isAlpha c || (c `elem` "_-+.,:;()[]{}?!")
+commonCh c = not (isSpace c) && (c `notElem` "\"'")
 
 escapeHStore :: T.Text -> T.Text
 escapeHStore b
     | T.any (`elem` "'") b = errort "HStore keys and values can't contain single quotes"
     | T.null b = T.pack "\"\""
     | T.all commonCh b = b
-    | T.all (\c -> commonCh c || (c `elem` " \"")) b = escaped b
+    | T.all (\c -> commonCh c || isSpace c || (c `elem` "\"")) b = escaped b
     | otherwise = errort $ "HStore key or value has invalid value: " ++ T.unpack b
 
 escapeHStoreBS :: ByteString -> ByteString
@@ -116,6 +116,13 @@ instance ToField SyncMap where
             --escaped = C8.cons '"' . (`C8.snoc` '"') . C8.intercalate (C8.pack "\\\"") . C8.split '"'
         -- hstoredValue (k, v) = Many [Plain (fromByteString k), plain "=>", Plain (fromByteString v)]
 
+data AnyValue = AnyValue { toAnyValue :: ByteString }
+    deriving (Eq, Ord, Read, Show)
+
+instance FromField AnyValue where
+    fromField _ Nothing = return $ AnyValue C8.empty
+    fromField _ (Just s) = return $ AnyValue s
+
 instance FromField FieldValue where
     fromField f d = foldr1 (<|>) tries where
         tries = [
@@ -124,7 +131,8 @@ instance FromField FieldValue where
             DoubleValue <$> fromField f d,
             BoolValue <$> fromField f d,
             StringValue <$> fromField f d,
-            HStoreValue <$> fromField f d]
+            HStoreValue <$> fromField f d,
+            (StringValue . C8.unpack . toAnyValue) <$> fromField f d]
 
 -- | Type of column
 data Type = Type {

@@ -35,7 +35,7 @@ reportDeclaration :: FilePath -> IO [(T.Text, T.Text)]
 reportDeclaration f = do
 	x <- Xlsx.xlsx f
 	[k, e] <- runResourceT $
-		Xlsx.cellSource x 0 (map Xlsx.int2col [1..10]) $$
+		Xlsx.cellSource x 0 (map Xlsx.int2col [1..32]) $$
 		CL.take 2
 	let
 		toTexts =
@@ -48,8 +48,8 @@ reportDeclaration f = do
 	print $ toTexts e
 	return $ zip (toTexts k) (toTexts e)
 
-generateReport :: Syncs -> [(T.Text, T.Text)] -> TIO [[FieldValue]]
-generateReport ss m = generate (reportc ss m') where
+generateReport :: Syncs -> [(T.Text, T.Text)] -> M.Map String (M.Map String String) -> TIO [[FieldValue]]
+generateReport ss m dicts = generate (reportc ss m') dicts where
 	m' = map T.unpack $ map snd m
 
 saveReport :: FilePath -> [T.Text] -> [[FieldValue]] -> IO ()
@@ -69,10 +69,10 @@ saveReport f ts fs = Xlsx.writeXlsx f [sheet] where
 	row r rowData = M.unions $ zipWith (cell r) [1..] rowData
 	cell r c d = M.singleton (c, r) (fieldValueToCell d)
 
-createReport :: Syncs -> FilePath -> FilePath -> TIO ()
-createReport ss from to = do
+createReport :: Syncs -> M.Map String (M.Map String String) -> FilePath -> FilePath -> TIO ()
+createReport ss dicts from to = do
 	reportDecl <- liftIO $ reportDeclaration from
-	fs <- generateReport ss reportDecl
+	fs <- generateReport ss reportDecl dicts
 	liftIO $ saveReport to (map fst reportDecl) fs
 
 fieldValueToCell :: FieldValue -> Xlsx.CellData

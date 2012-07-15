@@ -39,7 +39,7 @@ insert ss name m = withModel ss name $ \s -> S.insert s m
 select :: Syncs -> String -> Condition -> TIO SyncMap
 select ss name c = withModel ss name $ \s -> S.select s c
 
--- | Exists tows with condition
+-- | Exists rows with condition
 exists :: Syncs -> String -> Condition -> TIO Bool
 exists ss name c = withModel ss name $ \s -> S.exists s c
 
