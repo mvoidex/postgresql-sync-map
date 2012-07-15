@@ -49,7 +49,7 @@ condition ss s args = Condition tables fields' str args where
 	tables = nub $ map fst $ lefts fields
 	fields' = nub $ map (\(t, n) -> t ++ "." ++ n) $ lefts fields
 	-- TODO: Rewrite!
-	str = unwords $ map (either (\(t, n) -> t ++ "." ++ n) id) fields
+	str = "(" ++ (unwords $ map (either (\(t, n) -> t ++ "." ++ n) id) fields) ++ ")"
 
 	swords = words s
 	fields = map (parseField' ss) swords

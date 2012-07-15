@@ -63,7 +63,7 @@ valueToSyncMap _ (HStoreValue i) = i
 
 instance FromField SyncMap where
     fromField f Nothing = return M.empty
-    fromField f (Just s) = parse s where
+    fromField f (Just s) = if C8.null s then empty else parse s where
         trim = fst . C8.breakEnd (not . isSpace) . snd . C8.break (not . isSpace)
         trimq = removeq . trim where
             removeq s

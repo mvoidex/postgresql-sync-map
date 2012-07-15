@@ -31,6 +31,8 @@ import Data.String
 import Database.PostgreSQL.Sync.Condition
 import Text.Regex.Posix
 
+import Debug.Trace
+
 -- | Report field with function
 data ReportField = ReportField {
     reportFieldName :: String,
@@ -84,7 +86,7 @@ parseReportField ss field = fromMaybe (error "Impossible happenned in parseRepor
         where
             cond = condition ss field []
             noTables = null $ conditionTablesAffected cond
-    constanted = Just $ Report [] [ReportField field Nothing] []
+    constanted = Just $ Report [] [ReportField (if null field then "null" else field) Nothing] []
 
     tryHead [x] = x
     tryHead _ = error "Condition must use exactly one field"
@@ -103,7 +105,7 @@ reportc ss fs = rs { reportConditionts = reportConditionts rs ++ syncsRelations 
 
 generate :: Report -> M.Map String (M.Map String String) -> TIO [[FieldValue]]
 generate (Report ts fs cs) dicts = connection >>= generate' where
-    generate' con = liftIO $ liftM (map applyFunctions) $ query con q (conditionArguments cond) where
+    generate' con = liftIO $ liftM (map applyFunctions) $ traceShow q $ query con q (conditionArguments cond) where
         cond = mconcat $ filter (affects ts) cs
         q = fromString $ "select " ++ intercalate ", " (map reportFieldName fs) ++ " from " ++ intercalate ", " ts ++ toWhere cond
     applyFunctions :: [FieldValue] -> [FieldValue]
