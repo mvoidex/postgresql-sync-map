@@ -112,8 +112,8 @@ generate (Report ts fs cs) dicts = connection >>= generate' where
     applyFunctions = zipWith apply (map reportFieldFunction fs) where
         apply :: Maybe (String, [String]) -> FieldValue -> FieldValue
         apply Nothing v = v
-        apply (Just ("NAME", [])) (StringValue v) = maybe (StringValue "") StringValue $ listToMaybe $ words v
-        apply (Just ("SURNAME", [])) (StringValue v) = maybe (StringValue "") StringValue $ listToMaybe $ drop 1 $ words v
+        apply (Just ("NAME", [])) (StringValue v) = maybe (StringValue "") StringValue $ listToMaybe $ drop 1 $ words v
+        apply (Just ("SURNAME", [])) (StringValue v) = maybe (StringValue "") StringValue $ listToMaybe $ words v
         apply (Just ("LOOKUP", [d])) (StringValue v) = maybe (StringValue v) StringValue $ do
             dict <- M.lookup d dicts
             M.lookup v dict
