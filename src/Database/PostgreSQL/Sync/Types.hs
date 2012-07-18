@@ -85,7 +85,8 @@ instance FromField SyncMap where
                 check (l, r) = fmap ((,) l) r
         -- parse = M.fromList . map (C8.breakSubstring (fromString "=>") >>> (trimq *** (trimq . C8.drop 2))) . C8.split ','
 
-errort s = Debug.trace s $ error s
+-- errort s = Debug.trace s $ error s
+errort s = error s
 
 commonCh c = not (isSpace c) && (c `notElem` "\"'")
 
