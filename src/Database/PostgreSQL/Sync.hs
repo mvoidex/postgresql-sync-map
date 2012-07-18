@@ -102,17 +102,20 @@ tt q a = a
 --    Debug.traceShow q $ Debug.traceShow v a
 ttt q v a = a
 
-errort s = Debug.trace s $ error s
+-- errort s = Debug.trace s $ error s
+errort s = error s
 
 elog :: IO () -> IO ()
 elog act = E.catch act onError where
     onError :: E.SomeException -> IO ()
-    onError e = putStrLn $ "Failed with: " ++ show e
+    onError e = return ()
+    -- onError e = putStrLn $ "Failed with: " ++ show e
 
 elogt :: IO a -> IO a
 elogt act = E.catch act onError where
     onError :: E.SomeException -> IO a
-    onError e = putStrLn ("Failed with: " ++ show e) >> E.throwIO e
+    onError e = E.throwIO e
+    -- onError e = putStrLn ("Failed with: " ++ show e) >> E.throwIO e
 
 newtype TIO a = TIO (ReaderT Connection IO a)
     deriving (Monad, Functor, Applicative, MonadIO)
