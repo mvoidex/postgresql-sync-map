@@ -282,16 +282,16 @@ run = do
             putStrLn $ "rows affected: " ++ show i),
         ("report", takt $ do
             r <- reportIO
-            rs <- transaction con $ generate r tests (functions dicts) dicts
+            rs <- transaction con $ generate r tests (functions dicts)
             mapM_ putStrLn $ map (intercalate " | " . map show) rs),
         ("reportc", takt $ do
             r <- reportcIO
-            rs <- transaction con $ generate r tests (functions dicts) dicts
+            rs <- transaction con $ generate r tests (functions dicts)
             mapM_ putStrLn $ map (intercalate " | " . map show) rs),
         ("run-report", takt $ do
             f <- getLine
             t <- getLine
-            transaction con $ createReport tests (functions dicts) dicts f t)]
+            transaction con $ createReport tests (functions dicts) f t)]
     where
         modelIO :: IO String
         modelIO = putStrLn "model:" >> getLine

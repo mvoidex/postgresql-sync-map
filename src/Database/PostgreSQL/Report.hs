@@ -113,8 +113,8 @@ reportc :: Syncs -> [String] -> Report
 reportc ss fs = rs { reportConditionts = reportConditionts rs ++ syncsRelations ss } where
     rs = mconcat (map (parseReportField ss) fs)
 
-generate :: Report -> Syncs -> [ReportFunction] -> M.Map String (M.Map String String) -> TIO [[FieldValue]]
-generate (Report ts fs cs) ss funs dicts = connection >>= generate' where
+generate :: Report -> Syncs -> [ReportFunction] -> TIO [[FieldValue]]
+generate (Report ts fs cs) ss funs = connection >>= generate' where
     generate' con = liftIO $ liftM (map applyFunctions) $ traceShow q $ query con q (conditionArguments cond) where
         cond = mconcat $ filter (affects ts) cs
         q = fromString $ "select " ++ intercalate ", " (map reportFieldName fs) ++ " from " ++ intercalate ", " ts ++ toWhere cond
@@ -131,16 +131,3 @@ generate (Report ts fs cs) ss funs dicts = connection >>= generate' where
                     (t, n) <- parseField ss arg
                     M.lookup (t ++ "." ++ n) fieldValues
             reportFunction function fieldValues mainValue argValues
-
-{-
-        apply _ Nothing v = v
-        apply fieldValues (Just (name, args)) mainValue = where
-
-        apply _ Nothing v = v
-        apply _ (Just ("NAME", [])) (StringValue v) = maybe (StringValue "") StringValue $ listToMaybe $ drop 1 $ words v
-        apply _ (Just ("SURNAME", [])) (StringValue v) = maybe (StringValue "") StringValue $ listToMaybe $ words v
-        apply _ (Just ("LOOKUP", [d])) (StringValue v) = maybe (StringValue v) StringValue $ do
-            dict <- M.lookup d dicts
-            M.lookup v dict
-        apply _ _ v = v
--}

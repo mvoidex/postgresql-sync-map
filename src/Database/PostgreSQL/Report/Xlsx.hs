@@ -48,8 +48,8 @@ reportDeclaration f = do
 	print $ toTexts e
 	return $ zip (toTexts k) (toTexts e)
 
-generateReport :: Syncs -> [(T.Text, T.Text)] -> [ReportFunction] -> M.Map String (M.Map String String) -> TIO [[FieldValue]]
-generateReport ss m funs dicts = generate (reportc ss m') ss funs dicts where
+generateReport :: Syncs -> [(T.Text, T.Text)] -> [ReportFunction] -> TIO [[FieldValue]]
+generateReport ss m funs = generate (reportc ss m') ss funs where
 	m' = map T.unpack $ map snd m
 
 saveReport :: FilePath -> [T.Text] -> [[FieldValue]] -> IO ()
@@ -70,10 +70,10 @@ saveReport f ts fs = getCurrentTimeZone >>= saveReport' where
 		row r rowData = M.unions $ zipWith (cell r) [1..] rowData
 		cell r c d = M.singleton (c, r) (fieldValueToCell tz d)
 
-createReport :: Syncs -> [ReportFunction] -> M.Map String (M.Map String String) -> FilePath -> FilePath -> TIO ()
-createReport ss funs dicts from to = do
+createReport :: Syncs -> [ReportFunction] -> FilePath -> FilePath -> TIO ()
+createReport ss funs from to = do
 	reportDecl <- liftIO $ reportDeclaration from
-	fs <- generateReport ss reportDecl funs dicts
+	fs <- generateReport ss reportDecl funs
 	liftIO $ saveReport to (map fst reportDecl) fs
 
 fieldValueToCell :: TimeZone -> FieldValue -> Xlsx.CellData
