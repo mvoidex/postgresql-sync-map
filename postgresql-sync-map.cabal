@@ -32,6 +32,7 @@ library
         Database.PostgreSQL.Syncs
         Database.PostgreSQL.Models
         Database.PostgreSQL.Report
+        Database.PostgreSQL.Report.Function
         Database.PostgreSQL.Report.Xlsx
         Database.PostgreSQL.Sync.Condition
         Database.PostgreSQL.Sync.Types

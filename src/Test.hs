@@ -16,6 +16,7 @@ import qualified Data.ByteString.Char8 as C8
 import qualified Data.ByteString.Lazy.Char8 as LC8
 import qualified Data.Map as M
 import Data.List (intercalate)
+import Data.Char
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.FromField
 import Database.PostgreSQL.Simple.FromRow (FromRow)
@@ -30,6 +31,8 @@ import Data.String
 import qualified Data.Text as T
 import System.FilePath
 import System.Directory
+
+import Debug.Trace
 
 test :: Sync
 test = sync "test" "garbage" [
@@ -218,10 +221,26 @@ loadDicts cfg = do
     let dictNames = map (dropExtension . takeFileName) $ filter ((== ".json") . takeExtension) files
     loadMaps cfg dictNames
 
-dicts :: M.Map String (M.Map String String)
-dicts = M.fromList [
-    ("programs", M.fromList [
-        ("lala", "LALA PROGRAM")])]
+functions :: M.Map String (M.Map String String) -> [ReportFunction]
+functions ds = [
+    onString "NAME" (fromMaybe "" . listToMaybe . drop 1 . words),
+    onString "SURNAME" (fromMaybe "" . listToMaybe . words),
+    onString "UPPER" (map toUpper),
+    onString "LOWER" (map toLower),
+    function "CONCAT" concatFields,
+    functionMaybe "LOOKUP" lookupField]
+    where
+        concatFields :: FieldValue -> [FieldValue] -> FieldValue
+        concatFields f fs = StringValue $ concat $ mapMaybe fromStringField (f:fs)
+        fromStringField (StringValue s) = Just s
+        fromStringField _ = Nothing
+
+        lookupField :: FieldValue -> [FieldValue] -> Maybe FieldValue
+        lookupField (StringValue s) [StringValue d] = do
+            d' <- M.lookup d ds
+            s' <- M.lookup s d'
+            return $ StringValue s'
+        lookupField x y = Nothing
 
 run :: IO ()
 run = do
@@ -263,16 +282,16 @@ run = do
             putStrLn $ "rows affected: " ++ show i),
         ("report", takt $ do
             r <- reportIO
-            rs <- transaction con $ generate r dicts
+            rs <- transaction con $ generate r tests (functions dicts) dicts
             mapM_ putStrLn $ map (intercalate " | " . map show) rs),
         ("reportc", takt $ do
             r <- reportcIO
-            rs <- transaction con $ generate r dicts
+            rs <- transaction con $ generate r tests (functions dicts) dicts
             mapM_ putStrLn $ map (intercalate " | " . map show) rs),
         ("run-report", takt $ do
             f <- getLine
             t <- getLine
-            transaction con $ createReport tests dicts f t)]
+            transaction con $ createReport tests (functions dicts) dicts f t)]
     where
         modelIO :: IO String
         modelIO = putStrLn "model:" >> getLine

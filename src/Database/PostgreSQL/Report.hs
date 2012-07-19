@@ -7,10 +7,13 @@
 -- rs <- transaction con $ generate test reportTemplate
 -- @
 module Database.PostgreSQL.Report (
+    ReportField(..),
     Report(..),
     report,
     reportc,
-    generate
+    generate,
+
+    module Database.PostgreSQL.Report.Function
     ) where
 
 import Control.Arrow
@@ -29,6 +32,7 @@ import Data.Maybe
 import qualified Data.Map as M
 import Data.String
 import Database.PostgreSQL.Sync.Condition
+import Database.PostgreSQL.Report.Function
 import Text.Regex.Posix
 
 import Debug.Trace
@@ -57,13 +61,19 @@ parseRx x v = parse' (v =~ line x) where
     parse' ("", _, "", groups) = Just groups
     parse' _ = Nothing
 
-dumbSplit = words . map (\c -> if c == ',' then ' ' else c)
+split = unfoldr splitComma where
+    splitComma "" = Nothing
+    splitComma s = Just . second (drop 1) . break (== ',') $ s
+
+trim = p . p where
+    p = reverse . dropWhile isSpace
 
 identRx = "([a-zA-Z0-9_]+)"
+argRx = "([^,]*)"
 line s = "^" ++ s ++ "$"
 
 simpleRx = identRx ++ "\\." ++ identRx
-functionRx = identRx ++ "\\(" ++ simpleRx ++ "((, " ++ identRx ++ ")*)" ++ "\\)"
+functionRx = identRx ++ "\\(" ++ simpleRx ++ "((," ++ argRx ++ ")*)" ++ "\\)"
 
 -- | Parse report field
 -- model.name - simple field
@@ -79,7 +89,7 @@ parseReportField ss field = fromMaybe (error "Impossible happenned in parseRepor
     function = do
         [f, t, n, as, _, _] <- parseRx functionRx field
         (t', n') <- syncsField ss t n
-        return $ Report [t'] [ReportField (t' ++ "." ++ n') (Just (f, dumbSplit as))] []
+        return $ Report [t'] [ReportField (t' ++ "." ++ n') (Just (f, drop 1 . map trim . split $ as))] []
     conditioned = case parseField ss field of
         Just _ -> Nothing
         Nothing -> if noTables then Nothing else Just $ Report [tryHead $ conditionTablesAffected cond] [ReportField (tryHead $ conditionFieldsAffected cond) Nothing] [cond]
@@ -103,18 +113,34 @@ reportc :: Syncs -> [String] -> Report
 reportc ss fs = rs { reportConditionts = reportConditionts rs ++ syncsRelations ss } where
     rs = mconcat (map (parseReportField ss) fs)
 
-generate :: Report -> M.Map String (M.Map String String) -> TIO [[FieldValue]]
-generate (Report ts fs cs) dicts = connection >>= generate' where
+generate :: Report -> Syncs -> [ReportFunction] -> M.Map String (M.Map String String) -> TIO [[FieldValue]]
+generate (Report ts fs cs) ss funs dicts = connection >>= generate' where
     generate' con = liftIO $ liftM (map applyFunctions) $ traceShow q $ query con q (conditionArguments cond) where
         cond = mconcat $ filter (affects ts) cs
         q = fromString $ "select " ++ intercalate ", " (map reportFieldName fs) ++ " from " ++ intercalate ", " ts ++ toWhere cond
     applyFunctions :: [FieldValue] -> [FieldValue]
-    applyFunctions = zipWith apply (map reportFieldFunction fs) where
-        apply :: Maybe (String, [String]) -> FieldValue -> FieldValue
-        apply Nothing v = v
-        apply (Just ("NAME", [])) (StringValue v) = maybe (StringValue "") StringValue $ listToMaybe $ drop 1 $ words v
-        apply (Just ("SURNAME", [])) (StringValue v) = maybe (StringValue "") StringValue $ listToMaybe $ words v
-        apply (Just ("LOOKUP", [d])) (StringValue v) = maybe (StringValue v) StringValue $ do
+    applyFunctions fv = zipWith (apply fvs) (map reportFieldFunction fs) fv where
+        fvs = M.fromList $ zip (map reportFieldName fs) fv
+        apply :: M.Map String FieldValue -> Maybe (String, [String]) -> FieldValue -> FieldValue
+        apply fieldValues nameArgs mainValue = fromMaybe mainValue $ do
+            (name, args) <- nameArgs
+            function <- find ((name ==) . reportFunctionName) funs
+            let
+                argValues = map toArgValue args
+                toArgValue arg = fromMaybe (StringValue arg) $ do
+                    (t, n) <- parseField ss arg
+                    M.lookup (t ++ "." ++ n) fieldValues
+            reportFunction function fieldValues mainValue argValues
+
+{-
+        apply _ Nothing v = v
+        apply fieldValues (Just (name, args)) mainValue = where
+
+        apply _ Nothing v = v
+        apply _ (Just ("NAME", [])) (StringValue v) = maybe (StringValue "") StringValue $ listToMaybe $ drop 1 $ words v
+        apply _ (Just ("SURNAME", [])) (StringValue v) = maybe (StringValue "") StringValue $ listToMaybe $ words v
+        apply _ (Just ("LOOKUP", [d])) (StringValue v) = maybe (StringValue v) StringValue $ do
             dict <- M.lookup d dicts
             M.lookup v dict
-        apply _ v = v
+        apply _ _ v = v
+-}
