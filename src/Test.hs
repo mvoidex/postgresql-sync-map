@@ -223,6 +223,8 @@ loadDicts cfg = do
 
 functions :: M.Map String (M.Map String String) -> [ReportFunction]
 functions ds = [
+    uses ["case.id"] $ constFunction "CASEID" (M.lookup "case.id"),
+    onField "ID" id,
     onString "NAME" (fromMaybe "" . listToMaybe . drop 1 . words),
     onString "SURNAME" (fromMaybe "" . listToMaybe . words),
     onString "UPPER" (map toUpper),
@@ -230,17 +232,17 @@ functions ds = [
     function "CONCAT" concatFields,
     functionMaybe "LOOKUP" lookupField]
     where
-        concatFields :: FieldValue -> [FieldValue] -> FieldValue
-        concatFields f fs = StringValue $ concat $ mapMaybe fromStringField (f:fs)
+        concatFields :: [FieldValue] -> FieldValue
+        concatFields fs = StringValue $ concat $ mapMaybe fromStringField fs
         fromStringField (StringValue s) = Just s
         fromStringField _ = Nothing
 
-        lookupField :: FieldValue -> [FieldValue] -> Maybe FieldValue
-        lookupField (StringValue s) [StringValue d] = do
+        lookupField :: [FieldValue] -> Maybe FieldValue
+        lookupField [StringValue s, StringValue d] = do
             d' <- M.lookup d ds
             s' <- M.lookup s d'
             return $ StringValue s'
-        lookupField x y = Nothing
+        lookupField _ = Nothing
 
 run :: IO ()
 run = do
@@ -284,10 +286,6 @@ run = do
             r <- reportIO
             rs <- transaction con $ generate r tests (functions dicts)
             mapM_ putStrLn $ map (intercalate " | " . map show) rs),
-        ("reportc", takt $ do
-            r <- reportcIO
-            rs <- transaction con $ generate r tests (functions dicts)
-            mapM_ putStrLn $ map (intercalate " | " . map show) rs),
         ("run-report", takt $ do
             f <- getLine
             t <- getLine
@@ -303,16 +301,9 @@ run = do
         queryIO = putStrLn "query:" >> getLine
         reportIO :: IO Report
         reportIO = do
-            putStrLn "fields:"
-            fs <- getLine >>= readIO
-            putStrLn "conditions:"
-            cs <- getLine >>= readIO
-            return $ report tests fs (map (\c -> condition tests c []) cs)
-        reportcIO :: IO Report
-        reportcIO = do
             putStrLn "(field-with-condition)s:"
             fs <- getLine >>= readIO
-            return $ reportc tests fs
+            return $ fromMaybe (error "Unable to create report") $ report fs
         
         process ks = do
             k <- getLine

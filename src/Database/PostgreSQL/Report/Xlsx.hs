@@ -10,6 +10,7 @@ import Control.Monad.IO.Class
 import qualified Data.Map as M
 import qualified Data.Text as T
 import Data.List
+import Data.Maybe
 import Data.Ord
 import Data.Time.LocalTime
 import Data.Time.Clock.POSIX
@@ -49,8 +50,9 @@ reportDeclaration f = do
 	return $ zip (toTexts k) (toTexts e)
 
 generateReport :: Syncs -> [(T.Text, T.Text)] -> [ReportFunction] -> TIO [[FieldValue]]
-generateReport ss m funs = generate (reportc ss m') ss funs where
+generateReport ss m funs = generate rpt ss funs where
 	m' = map T.unpack $ map snd m
+        rpt = fromMaybe (error "Unable to create report") $ report m'
 
 saveReport :: FilePath -> [T.Text] -> [[FieldValue]] -> IO ()
 saveReport f ts fs = getCurrentTimeZone >>= saveReport' where
