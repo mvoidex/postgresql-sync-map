@@ -142,7 +142,7 @@ generate r ss funs = connection >>= generate' where
         args = M.fromList $ zip fs fv
         argss = M.mapKeys showField args
         apply :: ReportValue ReportField -> FieldValue
-        apply (ReportValue fname fargs) = fromMaybe (StringValue "<ERROR>") $ do
+        apply (ReportValue fname fargs) = fromMaybe (StringValue "") $ do
             function <- find ((fname ==) . reportFunctionName) (nullFun : funs)
             let
                 argValues = map toArgValue fargs
