@@ -52,7 +52,7 @@ reportDeclaration f = do
 generateReport :: Syncs -> [(T.Text, T.Text)] -> [ReportFunction] -> TIO [[FieldValue]]
 generateReport ss m funs = generate rpt ss funs where
 	m' = map T.unpack $ map snd m
-        rpt = fromMaybe (error "Unable to create report") $ report m'
+        rpt = fromMaybe (error $ "Unable to create report: " ++ show m) $ report m'
 
 saveReport :: FilePath -> [T.Text] -> [[FieldValue]] -> IO ()
 saveReport f ts fs = getCurrentTimeZone >>= saveReport' where

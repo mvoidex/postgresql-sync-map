@@ -46,7 +46,7 @@ data ReportField = ReportField {
 
 data ReportCondition = ReportCondition {
     reportConditionField :: ReportField,
-    reportConditionString :: (String, String) }
+    reportConditionString :: [String] }
         deriving (Eq, Read, Show)
 
 -- | Report template
@@ -81,10 +81,15 @@ parseReportValue = fmap extract . parseRx functionRx where
             Just v -> Right v
             Nothing -> Left s
 
+splitByStr :: String -> String -> [String]
+splitByStr str inStr = case inStr =~ str of
+    (_, "", "") -> [inStr]
+    (b, _, a) -> b : splitByStr str a
+
 parseCondition :: String -> Maybe ReportCondition
 parseCondition s = case s =~ fieldRx of
     (_, "", "", []) -> Nothing
-    (b, _, a, [m, n]) -> Just $ ReportCondition (ReportField m n) (b, a)
+    (b, _, a, [m, n]) -> Just $ ReportCondition (ReportField m n) (b : splitByStr (m ++ "." ++ n) a)
 
 parseReport :: String -> Maybe Report
 parseReport = fmap toReport . parseReportValueNull where
@@ -93,7 +98,7 @@ parseReport = fmap toReport . parseReportValueNull where
         fields = nub $ map reportConditionField conditions
         models = nub $ map reportModel fields
         values = fmap reportConditionField r
-        noCond cond = reportConditionString cond == ("", "")
+        noCond cond = reportConditionString cond == ["", ""]
 
 -- | Model field as report
 parseModelField :: String -> Maybe Report
@@ -128,7 +133,7 @@ generate r ss funs = connection >>= generate' where
     condition' = if null allConds then "" else " where " ++ intercalate " and " allConds
     -- TODO: Remove parseField and showField
     showField (ReportField m f) = m ++ "." ++ f
-    showCondition (ReportCondition fld (b, a)) = "(" ++ b ++ toFieldStr fld ++ a ++ ")"
+    showCondition (ReportCondition fld ins) = "(" ++ intercalate (toFieldStr fld) ins ++ ")"
     
     nullFun = onField "" id
     
@@ -168,3 +173,4 @@ split = unfoldr splitComma where
 
 trim = p . p where
     p = reverse . dropWhile isSpace
+
