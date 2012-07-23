@@ -37,7 +37,7 @@ reportDeclaration :: FilePath -> IO [(T.Text, T.Text)]
 reportDeclaration f = do
 	x <- Xlsx.xlsx f
 	[k, e] <- runResourceT $
-		Xlsx.cellSource x 0 (map Xlsx.int2col [1..32]) $$
+		Xlsx.cellSource x 0 (map Xlsx.int2col [1..256]) $$
 		CL.take 2
 	let
 		toTexts =
