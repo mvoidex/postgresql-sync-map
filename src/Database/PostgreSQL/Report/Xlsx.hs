@@ -12,6 +12,7 @@ import qualified Data.Text as T
 import Data.List
 import Data.Maybe
 import Data.Ord
+import Data.Monoid
 import Data.Time.LocalTime
 import Data.Time.Clock.POSIX
 
@@ -49,10 +50,12 @@ reportDeclaration f = do
 	print $ toTexts e
 	return $ zip (toTexts k) (toTexts e)
 
-generateReport :: Syncs -> [(T.Text, T.Text)] -> [ReportFunction] -> TIO [[FieldValue]]
-generateReport ss m funs = generate rpt ss funs where
+generateReport :: Syncs -> [ReportFunction] -> [(T.Text, T.Text)] -> [T.Text] -> TIO [[FieldValue]]
+generateReport ss funs m conds = generate rpt ss funs where
 	m' = map T.unpack $ map snd m
-        rpt = fromMaybe (error $ "Unable to create report: " ++ show m) $ report m'
+        flds = map report m'
+        additionalConds = map (condition . T.unpack) conds
+        rpt = fromMaybe (error $ "Unable to create report: " ++ show m) $ mconcat $ flds ++ additionalConds
 
 saveReport :: FilePath -> [T.Text] -> [[FieldValue]] -> IO ()
 saveReport f ts fs = getCurrentTimeZone >>= saveReport' where
@@ -72,10 +75,10 @@ saveReport f ts fs = getCurrentTimeZone >>= saveReport' where
 		row r rowData = M.unions $ zipWith (cell r) [1..] rowData
 		cell r c d = M.singleton (c, r) (fieldValueToCell tz d)
 
-createReport :: Syncs -> [ReportFunction] -> FilePath -> FilePath -> TIO ()
-createReport ss funs from to = do
+createReport :: Syncs -> [ReportFunction] -> [T.Text] -> FilePath -> FilePath -> TIO ()
+createReport ss funs conds from to = do
 	reportDecl <- liftIO $ reportDeclaration from
-	fs <- generateReport ss reportDecl funs
+	fs <- generateReport ss funs reportDecl conds
 	liftIO $ saveReport to (map fst reportDecl) fs
 
 fieldValueToCell :: TimeZone -> FieldValue -> Xlsx.CellData

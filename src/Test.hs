@@ -267,13 +267,13 @@ run = do
             w <- modelIO
             i <- intIO
             -- TODO: condition is not good function
-            m <- transaction con $ SM.select models w (condition tests (w ++ ".id = ?") [toField i])
+            m <- transaction con $ SM.select models w (conditionComplex tests (w ++ ".id = ?") [toField i])
             print m),
         ("update", takt $ do
             w <- modelIO
             i <- intIO
             m <- dataIO
-            transaction con $ SM.update models w (condition tests (w ++ ".id = ?") [toField i]) m),
+            transaction con $ SM.update models w (conditionComplex tests (w ++ ".id = ?") [toField i]) m),
         ("execute", takt $ do
             q <- queryIO
             anys <- elogq $ query_ con (fromString q)
@@ -289,7 +289,8 @@ run = do
         ("run-report", takt $ do
             f <- getLine
             t <- getLine
-            transaction con $ createReport tests (functions dicts) f t)]
+            c <- getLine >>= readIO
+            transaction con $ createReport tests (functions dicts) c f t)]
     where
         modelIO :: IO String
         modelIO = putStrLn "model:" >> getLine

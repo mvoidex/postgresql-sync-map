@@ -21,7 +21,7 @@ import qualified Data.Map as M
 -- | Make syncs
 syncs :: [(String, Sync)] -> [String] -> Syncs
 syncs ss cs = result where
-	result = Syncs (M.fromList ss) (map (\c -> condition result c []) cs)
+	result = Syncs (M.fromList ss) (map (\c -> conditionComplex result c []) cs)
 
 -- | Create tables
 create :: Syncs -> TIO ()

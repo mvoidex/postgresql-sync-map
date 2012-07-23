@@ -11,7 +11,7 @@ module Database.PostgreSQL.Report (
     ReportCondition(..),
     Report(..),
     ReportValue(..),
-    report,
+    report, condition,
     generate,
 
     module Database.PostgreSQL.Report.Function
@@ -91,8 +91,13 @@ parseCondition s = case s =~ fieldRx of
     (_, "", "", []) -> Nothing
     (b, _, a, [m, n]) -> Just $ ReportCondition (ReportField m n) (b : splitByStr (m ++ "." ++ n) a)
 
-parseReport :: String -> Maybe Report
-parseReport = fmap toReport . parseReportValueNull where
+-- | Report without output, only with condition on some field
+condition :: String -> Maybe Report
+condition = fmap toReport . parseCondition where
+    toReport rc@(ReportCondition rf@(ReportField m n) s) = Report [m] [rf] [] [rc]
+
+report :: String -> Maybe Report
+report = fmap toReport . parseReportValueNull where
     toReport r = Report models fields [values] (filter (not . noCond) conditions) where
         conditions = rights . reportValueArguments $ r
         fields = nub $ map reportConditionField conditions
@@ -106,9 +111,6 @@ parseModelField s = select $ s =~ fieldRx where
     select :: (String, String, String, [String]) -> Maybe Report
     select ("", _, "", [m, n]) = Just $ Report [m] [ReportField m n] [] []
     select _ = Nothing
-
-report :: [String] -> Maybe Report
-report = fmap mconcat . mapM parseReport
 
 generate :: Report -> Syncs -> [ReportFunction] -> TIO [[FieldValue]]
 generate r ss funs = connection >>= generate' where

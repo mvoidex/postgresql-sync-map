@@ -1,7 +1,7 @@
 module Database.PostgreSQL.Sync.Condition (
 	toWhere, affects,
-	conditionSimple,
-	condition, condField, syncsField, parseField,
+	conditionSimple, conditionComplex,
+        condField, syncsField, parseField,
 
 	module Database.PostgreSQL.Sync.Base
 	) where
@@ -44,8 +44,8 @@ conditionSimple :: String -> String -> (String -> String) -> [Action] -> Conditi
 conditionSimple table field fcond acts = Condition [table] [field] (fcond (table ++ "." ++ field)) acts
 
 -- | Create condition from string
-condition :: Syncs -> String -> [Action] -> Condition
-condition ss s args = Condition tables fields' str args where
+conditionComplex :: Syncs -> String -> [Action] -> Condition
+conditionComplex ss s args = Condition tables fields' str args where
 	tables = nub $ map fst $ lefts fields
 	fields' = nub $ map (\(t, n) -> t ++ "." ++ n) $ lefts fields
 	-- TODO: Rewrite!
