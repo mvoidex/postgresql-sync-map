@@ -121,8 +121,10 @@ generate r ss funs = connection >>= generate' where
     
     q = fromString $ "select " ++ intercalate ", " fs' ++ " from " ++ intercalate ", " ts ++ condition'
     -- table names, corresponding to models
-    ts = map (maybe (error "Unknown model name") syncTable . (`M.lookup` (syncsSyncs ss))) ms
-    toFieldStr = maybe (error "Unknown field name") (\(t, n) -> t ++ "." ++ n) . parseField ss . showField
+    ts = map (\ mdl -> maybe (error $ "Unknown model name: " ++ show mdl) syncTable $ (M.lookup mdl (syncsSyncs ss))) ms
+    toFieldStr f = maybe err (\(t, n) -> t ++ "." ++ n) $ parseField ss fstr where
+        fstr = showField f
+        err = error $ "Unknown field name: " ++ show fstr
     -- fields as they named in tables, not in models
     fs' = map toFieldStr fs
     -- conditions on fields
