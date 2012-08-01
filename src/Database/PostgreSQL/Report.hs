@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- | To make report use function report. Pass fields for report with conditions
 -- @
 -- reportTemplate = report [
@@ -17,6 +19,8 @@ module Database.PostgreSQL.Report (
     module Database.PostgreSQL.Report.Function
     ) where
 
+import Prelude hiding (log)
+
 import Control.Arrow
 import Control.Applicative
 import Control.Monad
@@ -35,8 +39,7 @@ import Data.String
 import Database.PostgreSQL.Sync.Condition
 import Database.PostgreSQL.Report.Function
 import Text.Regex.Posix
-
-import Debug.Trace
+import System.Log
 
 -- | Report field
 data ReportField = ReportField {
@@ -82,14 +85,17 @@ parseReportValue = fmap extract . parseRx functionRx where
             Nothing -> Left s
 
 splitByStr :: String -> String -> [String]
-splitByStr str inStr = case inStr =~ str of
-    (_, "", "") -> [inStr]
-    (b, _, a) -> b : splitByStr str a
+splitByStr str inStr = go (inStr =~ str) where
+    go :: (String, String, String) -> [String]
+    go (_, "", "") = [inStr]
+    go (b, _, a) = b : splitByStr str a
 
 parseCondition :: String -> Maybe ReportCondition
-parseCondition s = case s =~ fieldRx of
-    (_, "", "", []) -> Nothing
-    (b, _, a, [m, n]) -> Just $ ReportCondition (ReportField m n) (b : splitByStr (m ++ "." ++ n) a)
+parseCondition s = go (s =~ fieldRx) where
+    go :: (String, String, String, [String]) -> Maybe ReportCondition
+    go (_, "", "", []) = Nothing
+    go (b, _, a, [m, n]) = Just $ ReportCondition (ReportField m n) (b : splitByStr (m ++ "." ++ n) a)
+    go _ = error $ "Unable to parse condition: " ++ s
 
 -- | Report without output, only with condition on some field
 condition :: String -> Maybe Report
@@ -113,46 +119,55 @@ parseModelField s = select $ s =~ fieldRx where
     select _ = Nothing
 
 generate :: Report -> Syncs -> [ReportFunction] -> TIO [[FieldValue]]
-generate r ss funs = connection >>= generate' where
-    generate' con = liftIO $ liftM (map applyFunctions) $ query con q (conditionArguments $ mconcat csRels)
+generate r ss funs = scope "Report.generate" $ do
+    log Info "Generating report"
+    con <- connection
+    generate' con
+    where
+        generate' con = do
+            log Trace $ fromString $ "Report query: " ++ q
+            log Trace $ fromString $ "Report conditions: " ++ show (conditionArguments reportRel)
+            liftIO $ liftM (map applyFunctions) $ query con (fromString q) (conditionArguments reportRel)
+            where
+                q = "select " ++ intercalate ", " fs' ++ " from " ++ intercalate ", " ts ++ condition'
+                
+                rfuns = mconcat $ mapMaybe parseModelField $ concatMap reportFunctionImplicits funs
+                (Report ms fs vs cs) = r `mappend` rfuns
+
+                -- table names, corresponding to models
+                ts = map (\ mdl -> maybe (error $ "Unknown model name: " ++ show mdl) syncTable $ (M.lookup mdl (syncsSyncs ss))) ms
+                toFieldStr f = maybe err (\(t, n) -> t ++ "." ++ n) $ parseField ss fstr where
+                    fstr = showField f
+                    err = error $ "Unknown field name: " ++ show fstr
+                -- fields as they named in tables, not in models
+                fs' = map toFieldStr fs
+                -- conditions on fields
+                cs' = map showCondition cs
+                -- condition relations between tables
+                csRels = filter (affects ts) (syncsRelations ss)
+                reportRel = mconcat csRels
+                -- all conditions
+                allConds = cs' ++ map conditionString csRels
+                -- full condition
+                condition' = if null allConds then "" else " where " ++ intercalate " and " allConds
+                -- TODO: Remove parseField and showField
+                showField (ReportField m f) = m ++ "." ++ f
+                showCondition (ReportCondition fld ins) = "(" ++ intercalate (toFieldStr fld) ins ++ ")"
+
+                nullFun = onField "" id
     
-    rfuns = mconcat $ mapMaybe parseModelField $ concatMap reportFunctionImplicits funs
-    (Report ms fs vs cs) = r `mappend` rfuns
-    
-    q = fromString $ "select " ++ intercalate ", " fs' ++ " from " ++ intercalate ", " ts ++ condition'
-    -- table names, corresponding to models
-    ts = map (\ mdl -> maybe (error $ "Unknown model name: " ++ show mdl) syncTable $ (M.lookup mdl (syncsSyncs ss))) ms
-    toFieldStr f = maybe err (\(t, n) -> t ++ "." ++ n) $ parseField ss fstr where
-        fstr = showField f
-        err = error $ "Unknown field name: " ++ show fstr
-    -- fields as they named in tables, not in models
-    fs' = map toFieldStr fs
-    -- conditions on fields
-    cs' = map showCondition cs
-    -- condition relations between tables
-    csRels = filter (affects ts) (syncsRelations ss)
-    -- all conditions
-    allConds = cs' ++ map conditionString csRels
-    -- full condition
-    condition' = if null allConds then "" else " where " ++ intercalate " and " allConds
-    -- TODO: Remove parseField and showField
-    showField (ReportField m f) = m ++ "." ++ f
-    showCondition (ReportCondition fld ins) = "(" ++ intercalate (toFieldStr fld) ins ++ ")"
-    
-    nullFun = onField "" id
-    
-    applyFunctions :: [FieldValue] -> [FieldValue]
-    applyFunctions fv = map apply vs where
-        args = M.fromList $ zip fs fv
-        argss = M.mapKeys showField args
-        apply :: ReportValue ReportField -> FieldValue
-        apply (ReportValue fname fargs) = fromMaybe (StringValue "") $ do
-            function <- find ((fname ==) . reportFunctionName) (nullFun : funs)
-            let
-                argValues = map toArgValue fargs
-                toArgValue (Left s) = StringValue s
-                toArgValue (Right v) = fromMaybe (error $ "Invalid argument: " ++ show v) $ M.lookup v args
-            reportFunction function argss argValues
+                applyFunctions :: [FieldValue] -> [FieldValue]
+                applyFunctions fv = map apply vs where
+                    args = M.fromList $ zip fs fv
+                    argss = M.mapKeys showField args
+                    apply :: ReportValue ReportField -> FieldValue
+                    apply (ReportValue fname fargs) = fromMaybe (StringValue "") $ do
+                        function <- find ((fname ==) . reportFunctionName) (nullFun : funs)
+                        let
+                            argValues = map toArgValue fargs
+                            toArgValue (Left s) = StringValue s
+                            toArgValue (Right v) = fromMaybe (error $ "Invalid argument: " ++ show v) $ M.lookup v args
+                        reportFunction function argss argValues
 
 identRx = "([a-zA-Z0-9_]+)"
 fieldRx = identRx ++ "\\." ++ identRx
@@ -177,4 +192,3 @@ split = unfoldr splitComma where
 
 trim = p . p where
     p = reverse . dropWhile isSpace
-

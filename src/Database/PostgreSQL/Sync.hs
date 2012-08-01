@@ -32,10 +32,13 @@ module Database.PostgreSQL.Sync (
     module Database.PostgreSQL.Sync.Condition
     ) where
 
+import Prelude hiding (log, catch)
+
 import Blaze.ByteString.Builder (fromByteString)
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Reader
+import Control.Monad.CatchIO
 import qualified Control.Exception as E
 import Data.ByteString (ByteString)
 import Data.Monoid
@@ -49,8 +52,7 @@ import qualified Database.PostgreSQL.Simple.ToRow as PG
 import Data.List hiding (insert)
 import Data.String
 import qualified Data.Map as M
-
-import qualified Debug.Trace as Debug
+import System.Log
 
 -- | Make sync
 sync :: String -> String -> [SyncField] -> Sync
@@ -95,53 +97,52 @@ load (Sync tbl g cs) = fmap mconcat . mapM fromFieldValue . M.toList where
                 then Left ("Type mismatching, need type " ++ show (typeType t') ++ ", got " ++ show (valueType v))
                 else Right $ valueToSyncMap k' v
 
---tt q a = Debug.traceShow q a
-tt q a = a
+elog :: (MonadCatchIO m, MonadLog m) => m () -> m ()
+elog act = catch act onError where
+    onError :: (MonadCatchIO m, MonadLog m) => E.SomeException -> m ()
+    onError e = log Error $ fromString $ "Ignoring exception: " ++ show e
 
---ttt q v a = do
---    Debug.traceShow q $ Debug.traceShow v a
-ttt q v a = a
+elogt :: (MonadCatchIO m, MonadLog m) => m a -> m a
+elogt act = catch act onError where
+    onError :: (MonadCatchIO m, MonadLog m) => E.SomeException -> m a
+    onError e = do
+        log Error $ fromString $ "Rethrowing exception: " ++ show e
+        throw e
 
--- errort s = Debug.trace s $ error s
-errort s = error s
+data SyncConnection = SyncConnection {
+    syncConn :: Connection,
+    syncLog :: Log }
 
-elog :: IO () -> IO ()
-elog act = E.catch act onError where
-    onError :: E.SomeException -> IO ()
-    onError e = return ()
-    -- onError e = putStrLn $ "Failed with: " ++ show e
-
-elogt :: IO a -> IO a
-elogt act = E.catch act onError where
-    onError :: E.SomeException -> IO a
-    onError e = E.throwIO e
-    -- onError e = putStrLn ("Failed with: " ++ show e) >> E.throwIO e
-
-newtype TIO a = TIO (ReaderT Connection IO a)
-    deriving (Monad, Functor, Applicative, MonadIO)
+newtype TIO a = TIO (ReaderT SyncConnection IO a)
+    deriving (Monad, Functor, Applicative, MonadIO, MonadCatchIO)
 
 -- | Get connection inside monad
 connection :: TIO Connection
-connection = TIO ask
+connection = TIO $ asks syncConn
+
+instance MonadLog TIO where
+    askLog = TIO $ asks syncLog
 
 -- | Create table if not exists
 create :: Sync -> TIO ()
-create s@(Sync tbl hs cons) = do
+create s@(Sync tbl hs cons) = scope "Sync.create" $ do
     con <- connection
-    liftIO $ do
-        putStrLn $ "has table " ++ tbl ++ "?"
-        hasTable <- E.catch (tt qcheck (execute_ con qcheck) >> return True) (sqlError False)
-        putStrLn $ if hasTable then "yes" else "no"
-        unless hasTable $ elog $ do
-            putStrLn "creating table"
-            tt qcreate (execute_ con qcreate)
-            putStrLn "creating indices"
-            forM_ cons (createIndex con)
-            putStrLn "commiting"
-            commit con
+    log Trace $ fromString $ "Creating sync for table " ++ tbl
+    log Debug $ fromString $ "Checking whether database has table " ++ tbl
+    log Trace $ fromString $ "Query: " ++ qcheck
+    hasTable <- liftIO $ catch (execute_ con (fromString qcheck) >> return True) (sqlError False)
+    unless hasTable $ elog $ do
+        log Debug $ fromString $ "Table " ++ tbl ++ " doesn't exist"
+        log Trace $ fromString $ "Creating table " ++ tbl
+        log Trace $ fromString $ "Create table query: " ++ qcreate
+        liftIO $ execute_ con (fromString qcreate)
+        log Trace $ fromString $ "Creating indexes for table " ++ tbl
+        forM_ cons (createIndex con)
+        liftIO $ commit con
+    
     where
-        qcheck = fromString $ "select 1 from " ++ tbl ++ " where 1 = 0"
-        qcreate = fromString $ "create table " ++ tbl ++ " (" ++ intercalate ", " cols ++ ")"
+        qcheck = "select 1 from " ++ tbl ++ " where 1 = 0"
+        qcreate = "create table " ++ tbl ++ " (" ++ intercalate ", " cols ++ ")"
         sqlError :: a -> E.SomeException -> IO a
         sqlError v _ = return v
         cols :: [String]
@@ -150,70 +151,104 @@ create s@(Sync tbl hs cons) = do
             [hs ++ " hstore"]]
         asType (SyncField _ c _ t) = unwords [c, typeCreateString t]
         createIndex _ (SyncField _ c False _) = return ()
-        createIndex con (SyncField _ c True _) = elog $ void $ tt qindex (execute_ con qindex) where
-            qindex = fromString $ "create index " ++ c ++ "_index on " ++ tbl ++ " (" ++ c ++ ")"
+        createIndex con (SyncField _ c True _) = elog $ void $ do
+            log Trace $ fromString $ "Create index query: " ++ qindex
+            liftIO $ execute_ con (fromString qindex)
+            where
+                qindex = fromString $ "create index " ++ c ++ "_index on " ++ tbl ++ " (" ++ c ++ ")"
 
 -- | Insert Map into postgresql
 insert :: Sync -> SyncMap -> TIO ()
-insert s@(Sync tbl _ _) m = connection >>= insert' where
-    insert' con = liftIO $ void $ either onError onStore $ store s m where
-        onStore m' = ttt q v $ elogt $ execute con q v where
-            q = fromString $ "insert into " ++ tbl ++ " (" ++ cols ++ ") values (" ++ qms ++ ")"
-            cols = intercalate ", " $ M.keys m'
-            qms = intercalate ", " $ replicate (M.size m') "?"
-            v = M.elems m'
-        onError str = errort $ "Unable to insert data: " ++ str
-
+insert s@(Sync tbl _ _) m = scope "Sync.insert" $ do
+    con <- connection
+    void $ insert' con
+    where
+        insert' con = void $ either onError onStore $ store s m where
+            onStore m' = do
+                log Trace $ fromString $ "Inserting date into " ++ tbl
+                log Trace $ fromString $ "Insert query: " ++ q
+                log Trace $ fromString $ "Insert value: " ++ show v
+                liftIO $ execute con (fromString q) v
+                where
+                    q = "insert into " ++ tbl ++ " (" ++ cols ++ ") values (" ++ qms ++ ")"
+                    cols = intercalate ", " $ M.keys m'
+                    qms = intercalate ", " $ replicate (M.size m') "?"
+                    v = M.elems m'
+            onError str = error $ "Unable to insert data: " ++ str
+            
 -- | Select row by condition
 select :: Sync -> Condition -> TIO SyncMap
-select s@(Sync tbl g rs) cond = connection >>= select' where
-    select' con = liftIO $ ttt q (conditionArguments cond) (elogt $ query con q (conditionArguments cond)) >>= getHead >>= either onError return . load s . zipCols where
-        q = fromString $ "select " ++ cols ++ " from " ++ tbl ++ toWhere cond
-        cols = intercalate ", " $ (map syncColumn rs ++ [g])
-        zipCols = M.fromList . zip (map syncColumn rs ++ [g])
-        getHead [x] = return x
-        getHead xs = errort $ "Expected one row, returned " ++ show (length xs) ++ " rows"
-        onError str = errort $ "Unable to convert data on select: " ++ str
+select s@(Sync tbl g rs) cond = scoper "Sync.select" $ do
+    con <- connection
+    select' con
+    where
+        select' con = do
+            log Trace $ fromString $ "Selecting data from " ++ tbl
+            log Trace $ fromString $ "Select query: " ++ q
+            log Trace $ fromString $ "Select conditions: " ++ show (conditionArguments cond)
+            liftIO $ query con (fromString q) (conditionArguments cond) >>= getHead >>= either onError return . load s . zipCols
+            where
+                q = "select " ++ cols ++ " from " ++ tbl ++ toWhere cond
+                cols = intercalate ", " $ (map syncColumn rs ++ [g])
+                zipCols = M.fromList . zip (map syncColumn rs ++ [g])
+                getHead [x] = return x
+                getHead xs = error $ "Expected one row, returned " ++ show (length xs) ++ " rows"
+                onError str = error $ "Unable to convert data on select: " ++ str                
 
 -- | Exists rows with condition
 exists :: Sync -> Condition -> TIO Bool
-exists s@(Sync tbl g rs) cond = connection >>= exists' where
-    exists' con = liftIO $ ttt q (conditionArguments cond) (elogt $ query con q (conditionArguments cond)) >>= getHead >>= return . fromOnly where
-        q = fromString $ "select count(*) > 0 from " ++ tbl ++ toWhere cond
-        getHead [x] = return x
-        getHead xs = errort $ "Impossible happened, count must return one row"
-
+exists s@(Sync tbl g rs) cond = scoper "Sync.exists" $ do
+    con <- connection
+    exists' con
+    where
+        exists' con = do
+            log Trace $ fromString $ "Exists query: " ++ q
+            log Trace $ fromString $ "Exists conditions: " ++ show (conditionArguments cond)
+            liftIO $ query con (fromString q) (conditionArguments cond) >>= getHead >>= return . fromOnly
+            where
+                q = "select count(*) > 0 from " ++ tbl ++ toWhere cond
+                getHead [x] = return x
+                getHead xs = error $ "Impossible happened, count must return one row"
+    
 -- | Update by condition with values, stored in map
 update :: Sync -> Condition -> SyncMap -> TIO ()
-update s@(Sync tbl g _) cond m = connection >>= update' where
-    update' con = liftIO $ void $ either onError onUpdate $ store s m where
-        onUpdate m' = ttt q v $ elogt $ execute con q v where
-            q = fromString $ "update " ++ tbl ++ " set " ++ cols ++ toWhere cond
-            cols = intercalate ", " $ map updater $ M.keys m'
-            updater vv
-                -- FIXME: dirty
-                | vv == g = g ++ " = " ++ g ++ " || ?"
-                | otherwise = vv ++ " = ?"
-            v = M.elems m' ++ conditionArguments cond
-        onError str = errort $ "Unable to update data: " ++ str
+update s@(Sync tbl g _) cond m = scope "Sync.update" $ do
+    con <- connection
+    update' con
+    where
+        update' con = void $ either onError onUpdate $ store s m where
+            onUpdate m' = do
+                log Trace $ fromString $ "Update query: " ++ q
+                log Trace $ fromString $ "Update values: " ++ show v
+                liftIO $ execute con (fromString q) v
+                where
+                    q = "update " ++ tbl ++ " set " ++ cols ++ toWhere cond
+                    cols = intercalate ", " $ map updater $ M.keys m'
+                    updater vv
+                        -- FIXME: dirty
+                        | vv == g = g ++ " = " ++ g ++ " || ?"
+                        | otherwise = vv ++ " = ?"
+                    v = M.elems m' ++ conditionArguments cond
+            onError str = error $ "Unable to update data: " ++ str
 
 -- | Insert if not exists, update otherwise
 -- Returns True on update
 insertUpdate :: Sync -> Condition -> SyncMap -> TIO Bool
-insertUpdate s cond m = do
+insertUpdate s cond m = scope "Sync.insertUpdate" $ do
     e <- exists s cond
-    if e
-        then update s cond m
-        else insert s m
+    log Trace $ fromString $ if e then "Updating existing data" else "Inserting new data"
+    if e then update s cond m else insert s m
     return (not e)
 
 -- | Transaction
-transaction :: Connection -> TIO a -> IO a
-transaction con (TIO act) = runReaderT act con
+transaction :: Connection -> TIO a -> ReaderT Log IO a
+transaction con (TIO act) = do
+    l <- askLog
+    liftIO $ runReaderT act (SyncConnection con l)
 --transaction con (TIO act) = withTransaction con (runReaderT act con)
 
 -- | For now there is no module for use with snaplet-postgresql-simple,
 -- but you can use functions using this simple wrap:
 -- withPG (inPG $ update ...)
-inPG :: TIO a -> Connection -> IO a
+inPG :: TIO a -> Connection -> ReaderT Log IO a
 inPG = flip transaction

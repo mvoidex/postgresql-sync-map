@@ -25,7 +25,9 @@ library
         text,
         postgresql-simple,
         xlsx,
-        regex-posix
+        regex-posix,
+        MonadCatchIO-transformers,
+        simple-log
     exposed-modules:
         Database.PostgreSQL.Sync.Base
         Database.PostgreSQL.Sync

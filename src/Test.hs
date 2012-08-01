@@ -31,6 +31,7 @@ import Data.String
 import qualified Data.Text as T
 import System.FilePath
 import System.Directory
+import System.Log
 
 import Debug.Trace
 
@@ -249,11 +250,7 @@ run = do
     dicts <- loadDicts "/home/voidex/Documents/Projects/carma/srv/resources/site-config/dictionaries"
     con <- connect local
     elog $ void $ execute_ con "create extension hstore"
-    elog $ void $ transaction con $ create tests
-    --transaction con $ insert tests "test" testMap
-    --transaction con $ insert tests "test" testMap2
-    --transaction con $ insert tests "test2" test2Map
-    --transaction con $ insert tests "test2" test2Map2
+    elog $ void $ withNoLog $ transaction con $ create tests
     process [
         ("quit", stop),
         ("drop", takt $ do
@@ -262,18 +259,18 @@ run = do
         ("insert", takt $ do
             w <- modelIO
             m <- dataIO
-            transaction con $ SM.insert models w m),
+            withNoLog $ transaction con $ SM.insert models w m),
         ("select", takt $ do
             w <- modelIO
             i <- intIO
             -- TODO: condition is not good function
-            m <- transaction con $ SM.select models w (conditionComplex tests (w ++ ".id = ?") [toField i])
+            m <- withNoLog $ transaction con $ SM.select models w (conditionComplex tests (w ++ ".id = ?") [toField i])
             print m),
         ("update", takt $ do
             w <- modelIO
             i <- intIO
             m <- dataIO
-            transaction con $ SM.update models w (conditionComplex tests (w ++ ".id = ?") [toField i]) m),
+            withNoLog $ transaction con $ SM.update models w (conditionComplex tests (w ++ ".id = ?") [toField i]) m),
         ("execute", takt $ do
             q <- queryIO
             anys <- elogq $ query_ con (fromString q)
@@ -284,13 +281,13 @@ run = do
             putStrLn $ "rows affected: " ++ show i),
         ("report", takt $ do
             r <- reportIO
-            rs <- transaction con $ generate r tests (functions dicts)
+            rs <- withNoLog $ transaction con $ generate r tests (functions dicts)
             mapM_ putStrLn $ map (intercalate " | " . map show) rs),
         ("run-report", takt $ do
             f <- getLine
             t <- getLine
             c <- getLine >>= readIO
-            transaction con $ createReport tests (functions dicts) c f t)]
+            withNoLog $ transaction con $ createReport tests (functions dicts) c f t)]
     where
         modelIO :: IO String
         modelIO = putStrLn "model:" >> getLine
