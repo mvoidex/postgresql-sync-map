@@ -85,18 +85,15 @@ instance FromField SyncMap where
                 check (l, r) = fmap ((,) l) r
         -- parse = M.fromList . map (C8.breakSubstring (fromString "=>") >>> (trimq *** (trimq . C8.drop 2))) . C8.split ','
 
--- errort s = Debug.trace s $ error s
-errort s = error s
-
 commonCh c = not (isSpace c) && (c `notElem` "\"'")
 
 escapeHStore :: T.Text -> T.Text
 escapeHStore b
-    | T.any (`elem` "'") b = errort "HStore keys and values can't contain single quotes"
+    | T.any (`elem` "'") b = error $ "HStore keys and values can't contain single quotes: " ++ T.unpack b
     | T.null b = T.pack "\"\""
     | T.all commonCh b = b
     | T.all (\c -> commonCh c || isSpace c || (c `elem` "\"")) b = escaped b
-    | otherwise = errort $ "HStore key or value has invalid value: " ++ T.unpack b
+    | otherwise = error $ "HStore key or value has invalid value: " ++ T.unpack b
 
 escapeHStoreBS :: ByteString -> ByteString
 escapeHStoreBS = T.encodeUtf8 . escapeHStore . T.decodeUtf8
@@ -110,12 +107,6 @@ instance ToField SyncMap where
         -- | TODO: Escape!
         hstoredValue (k, v) = Many [byteString k, plain "=>", byteString v] where
             byteString b = Plain (fromByteString $ escapeHStoreBS b)
-            --    | C8.any (`elem` "'") b = error "HStore keys and values can't contain single quotes"
-            --    | C8.all (\c -> isDigit c || isAlpha c) b = Plain (fromByteString b)
-            --    | C8.all (\c -> isDigit c || isAlpha c || (c `elem` " \"")) b = Plain (fromByteString $ escaped b)
-            --    | otherwise = error $ "HStore key or value has invalid value: " ++ show b
-            --escaped = C8.cons '"' . (`C8.snoc` '"') . C8.intercalate (C8.pack "\\\"") . C8.split '"'
-        -- hstoredValue (k, v) = Many [Plain (fromByteString k), plain "=>", Plain (fromByteString v)]
 
 data AnyValue = AnyValue { toAnyValue :: ByteString }
     deriving (Eq, Ord, Read, Show)
@@ -145,8 +136,8 @@ data Type = Type {
 
 tryRead :: Read a => ByteString -> Either String a
 tryRead bs = case reads (C8.unpack bs) of
-    [(v, s)] -> if all isSpace s then Right v else Left "Can't read value"
-    _ -> Left "Can't read value"
+    [(v, s)] -> if all isSpace s then Right v else Left ("Can't read value: " ++ C8.unpack bs)
+    _ -> Left ("Can't read value: " ++ C8.unpack bs)
 
 -- | Convert string value to action
 valueToAction :: Type -> ByteString -> Either String Action

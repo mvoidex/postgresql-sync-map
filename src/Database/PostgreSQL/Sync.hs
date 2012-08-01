@@ -167,7 +167,7 @@ insert s@(Sync tbl _ _) m = scope "Sync.insert" $ do
     where
         insert' con = void $ either onError onStore $ store s m where
             onStore m' = do
-                log Trace $ fromString $ "Inserting date into " ++ tbl
+                log Trace $ fromString $ "Inserting data into " ++ tbl
                 fmtQ <- liftIO $ formatQuery con q v
                 log Trace $ T.concat ["Insert query: ", T.decodeUtf8 fmtQ]
                 liftIO $ execute con q v
