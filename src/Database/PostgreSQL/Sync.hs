@@ -51,6 +51,8 @@ import Database.PostgreSQL.Simple.ToField (Action(..), ToField(..))
 import qualified Database.PostgreSQL.Simple.ToRow as PG
 import Data.List hiding (insert)
 import Data.String
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import qualified Data.Map as M
 import System.Log
 
@@ -166,11 +168,11 @@ insert s@(Sync tbl _ _) m = scope "Sync.insert" $ do
         insert' con = void $ either onError onStore $ store s m where
             onStore m' = do
                 log Trace $ fromString $ "Inserting date into " ++ tbl
-                log Trace $ fromString $ "Insert query: " ++ q
-                log Trace $ fromString $ "Insert value: " ++ show v
-                liftIO $ execute con (fromString q) v
+                fmtQ <- liftIO $ formatQuery con q v
+                log Trace $ T.concat ["Insert query: ", T.decodeUtf8 fmtQ]
+                liftIO $ execute con q v
                 where
-                    q = "insert into " ++ tbl ++ " (" ++ cols ++ ") values (" ++ qms ++ ")"
+                    q = fromString $ "insert into " ++ tbl ++ " (" ++ cols ++ ") values (" ++ qms ++ ")"
                     cols = intercalate ", " $ M.keys m'
                     qms = intercalate ", " $ replicate (M.size m') "?"
                     v = M.elems m'
@@ -184,11 +186,11 @@ select s@(Sync tbl g rs) cond = scoper "Sync.select" $ do
     where
         select' con = do
             log Trace $ fromString $ "Selecting data from " ++ tbl
-            log Trace $ fromString $ "Select query: " ++ q
-            log Trace $ fromString $ "Select conditions: " ++ show (conditionArguments cond)
-            liftIO $ query con (fromString q) (conditionArguments cond) >>= getHead >>= either onError return . load s . zipCols
+            fmtQ <- liftIO $ formatQuery con q (conditionArguments cond)
+            log Trace $ T.concat ["Select query: ", T.decodeUtf8 fmtQ]
+            liftIO $ query con q (conditionArguments cond) >>= getHead >>= either onError return . load s . zipCols
             where
-                q = "select " ++ cols ++ " from " ++ tbl ++ toWhere cond
+                q = fromString $ "select " ++ cols ++ " from " ++ tbl ++ toWhere cond
                 cols = intercalate ", " $ (map syncColumn rs ++ [g])
                 zipCols = M.fromList . zip (map syncColumn rs ++ [g])
                 getHead [x] = return x
@@ -202,11 +204,11 @@ exists s@(Sync tbl g rs) cond = scoper "Sync.exists" $ do
     exists' con
     where
         exists' con = do
-            log Trace $ fromString $ "Exists query: " ++ q
-            log Trace $ fromString $ "Exists conditions: " ++ show (conditionArguments cond)
-            liftIO $ query con (fromString q) (conditionArguments cond) >>= getHead >>= return . fromOnly
+            fmtQ <- liftIO $ formatQuery con q (conditionArguments cond)
+            log Trace $ T.concat ["Exists query: ", T.decodeUtf8 fmtQ]
+            liftIO $ query con q (conditionArguments cond) >>= getHead >>= return . fromOnly
             where
-                q = "select count(*) > 0 from " ++ tbl ++ toWhere cond
+                q = fromString $ "select count(*) > 0 from " ++ tbl ++ toWhere cond
                 getHead [x] = return x
                 getHead xs = error $ "Impossible happened, count must return one row"
     
@@ -218,11 +220,11 @@ update s@(Sync tbl g _) cond m = scope "Sync.update" $ do
     where
         update' con = void $ either onError onUpdate $ store s m where
             onUpdate m' = do
-                log Trace $ fromString $ "Update query: " ++ q
-                log Trace $ fromString $ "Update values: " ++ show v
-                liftIO $ execute con (fromString q) v
+                fmtQ <- liftIO $ formatQuery con q v
+                log Trace $ T.concat ["Update query: ", T.decodeUtf8 fmtQ]
+                liftIO $ execute con q v
                 where
-                    q = "update " ++ tbl ++ " set " ++ cols ++ toWhere cond
+                    q = fromString $ "update " ++ tbl ++ " set " ++ cols ++ toWhere cond
                     cols = intercalate ", " $ map updater $ M.keys m'
                     updater vv
                         -- FIXME: dirty
