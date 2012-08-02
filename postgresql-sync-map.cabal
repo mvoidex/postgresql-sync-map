@@ -38,5 +38,6 @@ library
         Database.PostgreSQL.Report.Xlsx
         Database.PostgreSQL.Sync.Condition
         Database.PostgreSQL.Sync.Types
+        Database.PostgreSQL.Sync.JSON
     other-modules:
         Test
