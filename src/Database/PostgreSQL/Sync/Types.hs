@@ -85,20 +85,24 @@ instance FromField SyncMap where
                 check (l, r) = fmap ((,) l) r
         -- parse = M.fromList . map (C8.breakSubstring (fromString "=>") >>> (trimq *** (trimq . C8.drop 2))) . C8.split ','
 
-commonCh c = not (isSpace c) && (c `notElem` "\"'")
+commonCh c = (isDigit c) || (isAlpha c)
+-- commonCh c = not (isSpace c) && (c `notElem` "\"'")
 
 escapeHStore :: T.Text -> T.Text
 escapeHStore b
-    | T.any (`elem` "'") b = error $ "HStore keys and values can't contain single quotes: " ++ T.unpack b
     | T.null b = T.pack "\"\""
     | T.all commonCh b = b
-    | T.all (\c -> commonCh c || isSpace c || (c `elem` "\"")) b = escaped b
-    | otherwise = error $ "HStore key or value has invalid value: " ++ T.unpack b
+    | otherwise = escaped b
+--    | T.all (\c -> commonCh c || isSpace c || (c `elem` "\"'")) b = escaped b
+--    | otherwise = error $ "HStore key or value has invalid value: " ++ T.unpack b
 
 escapeHStoreBS :: ByteString -> ByteString
 escapeHStoreBS = T.encodeUtf8 . escapeHStore . T.decodeUtf8
 
-escaped = T.cons '"' . (`T.snoc` '"') . T.intercalate (T.pack "\\\"") . T.split (== '"')
+replaceWith :: Char -> String -> T.Text -> T.Text
+replaceWith ch str = T.intercalate (T.pack str) . T.split (== ch)
+
+escaped = T.cons '"' . (`T.snoc` '"') . replaceWith '"' "\\\"" . replaceWith '\'' "''"
 
 instance ToField SyncMap where
     toField = Many . plainQuote . intersperse (plain ", ") . map hstoredValue . M.toList where
@@ -134,10 +138,13 @@ data Type = Type {
     -- ^ Name for table create
     typeKey :: ByteString -> Either String Action }
 
-tryRead :: Read a => ByteString -> Either String a
-tryRead bs = case reads (C8.unpack bs) of
-    [(v, s)] -> if all isSpace s then Right v else Left ("Can't read value: " ++ C8.unpack bs)
-    _ -> Left ("Can't read value: " ++ C8.unpack bs)
+tryRead :: Read a => ByteString -> Either String (Maybe a)
+tryRead bs
+    | C8.null bs = Right Nothing
+    | C8.pack "null" == bs = Right Nothing
+    | otherwise = case reads (C8.unpack bs) of
+        [(v, s)] -> if all isSpace s then Right (Just v) else Left ("Can't read value: " ++ C8.unpack bs)
+        _ -> Left ("Can't read value: " ++ C8.unpack bs)
 
 -- | Convert string value to action
 valueToAction :: Type -> ByteString -> Either String Action
@@ -145,15 +152,15 @@ valueToAction t s = typeKey t s
 
 -- | Int type
 int :: Type
-int = Type IntType "integer" (fmap toField . (tryRead :: ByteString -> Either String Int))
+int = Type IntType "integer" (fmap toField . (tryRead :: ByteString -> Either String (Maybe Int)))
 
 -- | Double type
 double :: Type
-double = Type DoubleType "double precision" (fmap toField . (tryRead :: ByteString -> Either String Double))
+double = Type DoubleType "double precision" (fmap toField . (tryRead :: ByteString -> Either String (Maybe Double)))
 
 -- | Bool type
 bool :: Type
-bool = Type BoolType "boolean" (fmap toField . (tryRead :: ByteString -> Either String Bool))
+bool = Type BoolType "boolean" (fmap toField . (tryRead :: ByteString -> Either String (Maybe Bool)))
 
 -- | String type
 string :: Type
@@ -161,4 +168,4 @@ string = Type StringType "text" (fmap toField . return)
 
 -- | Time type
 time :: Type
-time = Type TimeType "timestamp" (fmap (toField . posixSecondsToUTCTime . (fromIntegral :: Int -> POSIXTime)) . (tryRead :: ByteString -> Either String Int))
+time = Type TimeType "timestamp" (fmap (toField . fmap (posixSecondsToUTCTime . (fromIntegral :: Int -> POSIXTime))) . (tryRead :: ByteString -> Either String (Maybe Int)))
