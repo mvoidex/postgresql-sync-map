@@ -57,7 +57,7 @@ models ss = Models ss . M.fromList
 
 -- | Perform action on model
 withModel :: Models -> String -> (Model -> a) -> a
-withModel ms name f = maybe (error "No model with name") f $ M.lookup name (modelsModels ms)
+withModel ms name f = maybe (error $ "No model with name: " ++ name) f $ M.lookup name (modelsModels ms)
 
 instance Monoid ModelConstraint where
     mempty = ModelConstraint (id, id) mempty

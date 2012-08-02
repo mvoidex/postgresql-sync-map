@@ -7,6 +7,7 @@ module Database.PostgreSQL.Sync.Types (
     typeType, valueType,
     valueToSyncMap,
     escapeHStore, escapeHStoreBS,
+    escapeHKey, escapeHKeyBS,
     valueToAction,
     int, double, bool, string, time,
     
@@ -85,9 +86,10 @@ instance FromField SyncMap where
                 check (l, r) = fmap ((,) l) r
         -- parse = M.fromList . map (C8.breakSubstring (fromString "=>") >>> (trimq *** (trimq . C8.drop 2))) . C8.split ','
 
-commonCh c = (isDigit c) || (isAlpha c)
+commonCh c = (isDigit c) || (isAlpha c) || (c `elem` "_")
 -- commonCh c = not (isSpace c) && (c `notElem` "\"'")
 
+-- | Escape HStore key or value in format 'key => value'
 escapeHStore :: T.Text -> T.Text
 escapeHStore b
     | T.null b = T.pack "\"\""
@@ -96,13 +98,25 @@ escapeHStore b
 --    | T.all (\c -> commonCh c || isSpace c || (c `elem` "\"'")) b = escaped b
 --    | otherwise = error $ "HStore key or value has invalid value: " ++ T.unpack b
 
+-- | Escape HStore key in column -> 'key' format
+escapeHKey :: T.Text -> T.Text
+escapeHKey b
+    | T.null b = T.empty
+    | T.all commonCh b = b
+    | otherwise = escapedKey b
+
 escapeHStoreBS :: ByteString -> ByteString
 escapeHStoreBS = T.encodeUtf8 . escapeHStore . T.decodeUtf8
+
+escapeHKeyBS :: ByteString -> ByteString
+escapeHKeyBS = T.encodeUtf8 . escapeHKey . T.decodeUtf8
 
 replaceWith :: Char -> String -> T.Text -> T.Text
 replaceWith ch str = T.intercalate (T.pack str) . T.split (== ch)
 
 escaped = T.cons '"' . (`T.snoc` '"') . replaceWith '"' "\\\"" . replaceWith '\'' "''"
+
+escapedKey = replaceWith '\'' "''"
 
 instance ToField SyncMap where
     toField = Many . plainQuote . intersperse (plain ", ") . map hstoredValue . M.toList where

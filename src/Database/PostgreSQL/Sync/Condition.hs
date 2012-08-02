@@ -59,7 +59,7 @@ conditionComplex ss s args = Condition tables fields' str args where
 condField :: Sync -> String -> (String, String)
 condField (Sync t h cs) name = case find ((== name) . syncKey) cs of
     (Just (SyncField k c _ _)) -> (t, c)
-    Nothing -> (t, h ++ " -> '" ++ T.unpack (escapeHStore (T.pack name)) ++ "'")
+    Nothing -> (t, h ++ " -> '" ++ T.unpack (escapeHKey (T.pack name)) ++ "'")
 
 syncsField :: Syncs -> String -> String -> Maybe (String, String)
 syncsField ss model name = fmap (\s -> condField s name) $ M.lookup model (syncsSyncs ss)
