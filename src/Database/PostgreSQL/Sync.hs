@@ -132,7 +132,7 @@ create s@(Sync tbl hs cons) = scope "Sync.create" $ do
     log Trace $ fromString $ "Creating sync for table " ++ tbl
     log Debug $ fromString $ "Checking whether database has table " ++ tbl
     log Trace $ fromString $ "Query: " ++ qcheck
-    hasTable <- liftIO $ catch (execute_ con (fromString qcheck) >> return True) (sqlError False)
+    hasTable <- liftIO $ catch (checkQuery con >> return True) (sqlError False)
     unless hasTable $ elog $ do
         log Debug $ fromString $ "Table " ++ tbl ++ " doesn't exist"
         log Trace $ fromString $ "Creating table " ++ tbl
@@ -143,6 +143,8 @@ create s@(Sync tbl hs cons) = scope "Sync.create" $ do
         liftIO $ commit con
     
     where
+        checkQuery :: Connection -> IO [Only Int]
+        checkQuery con = query_ con (fromString qcheck)
         qcheck = "select 1 from " ++ tbl ++ " where 1 = 0"
         qcreate = "create table " ++ tbl ++ " (" ++ intercalate ", " cols ++ ")"
         sqlError :: a -> E.SomeException -> IO a
