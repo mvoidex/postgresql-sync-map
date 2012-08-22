@@ -2,7 +2,7 @@
 
 module Database.PostgreSQL.Models (
     constant, adjustField,
-    model, models,
+    model, models, withModel,
 
     insert, select, exists, update, insertUpdate,
 
