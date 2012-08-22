@@ -27,6 +27,7 @@ library
         xlsx,
         regex-posix,
         MonadCatchIO-transformers,
+        old-locale,
         simple-log
     exposed-modules:
         Database.PostgreSQL.Sync.Base

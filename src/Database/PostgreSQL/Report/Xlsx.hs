@@ -13,6 +13,7 @@ import Data.List
 import Data.Maybe
 import Data.Ord
 import Data.Monoid
+import Data.Time
 import Data.Time.LocalTime
 import Data.Time.Clock.POSIX
 
@@ -25,6 +26,8 @@ import qualified Data.Conduit.List as CL
 import qualified Codec.Xlsx as Xlsx
 import qualified Codec.Xlsx.Parser as Xlsx
 import qualified Codec.Xlsx.Writer as Xlsx
+
+import System.Locale
 
 oneRow :: FilePath -> IO (Maybe (M.Map T.Text T.Text))
 oneRow f = do
@@ -84,8 +87,13 @@ fieldValueToCell _ (IntValue i) = cell $ Xlsx.CellText $ T.pack $ show i
 fieldValueToCell _ (DoubleValue i) = cell $ Xlsx.CellDouble i
 fieldValueToCell _ (BoolValue i) = cell $ Xlsx.CellText $ T.pack $ show i
 fieldValueToCell _ (StringValue i) = cell $ Xlsx.CellText $ T.pack i
+fieldValueToCell tz (TimeValue i) = cell $ Xlsx.CellText $ T.pack $ fmt $ toLocalTime i where
+    fmt = formatTime defaultTimeLocale "%d.%m.%y"
+    toLocalTime = utcToLocalTime tz . posixSecondsToUTCTime
+{-
 fieldValueToCell tz (TimeValue i) = cell $ Xlsx.CellLocalTime $ toLocalTime i where
     toLocalTime = utcToLocalTime tz . posixSecondsToUTCTime
+-}
 fieldValueToCell _ (HStoreValue i)
     | M.null i = cell $ Xlsx.CellText $ T.empty
     | otherwise = error $ "HStore can't be in one cell: " ++ show i
