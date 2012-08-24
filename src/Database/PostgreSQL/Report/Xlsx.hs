@@ -88,7 +88,7 @@ fieldValueToCell _ (DoubleValue i) = cell $ Xlsx.CellDouble i
 fieldValueToCell _ (BoolValue i) = cell $ Xlsx.CellText $ T.pack $ show i
 fieldValueToCell _ (StringValue i) = cell $ Xlsx.CellText $ T.pack i
 fieldValueToCell tz (TimeValue i) = cell $ Xlsx.CellText $ T.pack $ fmt $ toLocalTime i where
-    fmt = formatTime defaultTimeLocale "%d.%m.%y"
+    fmt = formatTime defaultTimeLocale "%d.%m.%Y %H:%M"
     toLocalTime = utcToLocalTime tz . posixSecondsToUTCTime
 {-
 fieldValueToCell tz (TimeValue i) = cell $ Xlsx.CellLocalTime $ toLocalTime i where
