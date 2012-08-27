@@ -130,7 +130,7 @@ create :: Sync -> TIO ()
 create s@(Sync tbl hs cons) = scope "Sync.create" $ do
     con <- connection
     log Trace $ fromString $ "Creating sync for table " ++ tbl
-    log Debug $ fromString $ "Checking whether database has table " ++ tbl
+    log Trace $ fromString $ "Checking whether database has table " ++ tbl
     log Trace $ fromString $ "Query: " ++ qcheck
     hasTable <- liftIO $ catch (checkQuery con >> return True) (sqlError False)
     unless hasTable $ elog $ do
