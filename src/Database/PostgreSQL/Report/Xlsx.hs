@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Database.PostgreSQL.Report.Xlsx (
     oneRow,
     reportDeclaration,
@@ -6,6 +8,8 @@ module Database.PostgreSQL.Report.Xlsx (
     createReport
     ) where
 
+import Prelude hiding (log)
+
 import Control.Monad.IO.Class
 import qualified Data.Map as M
 import qualified Data.Text as T
@@ -13,6 +17,7 @@ import Data.List
 import Data.Maybe
 import Data.Ord
 import Data.Monoid
+import Data.String
 import Data.Time
 import Data.Time.LocalTime
 import Data.Time.Clock.POSIX
@@ -27,6 +32,7 @@ import qualified Codec.Xlsx as Xlsx
 import qualified Codec.Xlsx.Parser as Xlsx
 import qualified Codec.Xlsx.Writer as Xlsx
 
+import System.Log
 import System.Locale
 
 oneRow :: FilePath -> IO (Maybe (M.Map T.Text T.Text))
@@ -36,10 +42,11 @@ oneRow f = do
         Xlsx.sheetRowSource x 0 $$
         CL.peek
 
-reportDeclaration :: FilePath -> IO [(T.Text, T.Text)]
+reportDeclaration :: (MonadLog m, MonadIO m) => FilePath -> m [(T.Text, T.Text)]
 reportDeclaration f = do
-    x <- Xlsx.xlsx f
-    [k, e] <- runResourceT $
+    log Trace $ T.concat ["Loading report ", fromString f]
+    x <- liftIO $ Xlsx.xlsx f
+    [k, e] <- liftIO $ runResourceT $
               Xlsx.cellSource x 0 (map Xlsx.int2col [1..256]) $$
               CL.take 2
     let
@@ -49,7 +56,11 @@ reportDeclaration f = do
         toText Nothing = T.empty
         toText (Just (Xlsx.CellText t)) = t
         toText (Just _) = T.empty
-    return $ zip (toTexts k) (toTexts e)
+        kTexts = toTexts k
+        eTexts = toTexts e
+    log Debug $ T.concat ["Column names: ", T.intercalate ", " kTexts]
+    log Debug $ T.concat ["Template expressions: ", T.intercalate ", " eTexts]
+    return $ zip kTexts eTexts
 
 generateReport :: Syncs -> [ReportFunction] -> [(T.Text, T.Text)] -> [T.Text] -> TIO [[FieldValue]]
 generateReport ss funs m conds = generate rpt ss funs where
@@ -58,29 +69,32 @@ generateReport ss funs m conds = generate rpt ss funs where
     additionalConds = map (condition . T.unpack) conds
     rpt = fromMaybe (error $ "Unable to create report: " ++ show m) $ mconcat $ flds ++ additionalConds
 
-saveReport :: FilePath -> [T.Text] -> [[FieldValue]] -> IO ()
-saveReport f ts fs = getCurrentTimeZone >>= saveReport' where
-    saveReport' tz = Xlsx.writeXlsx f [sheet] where
-        allRows = names : fs
-        names = map (StringValue . T.unpack) ts
-        sheet = Xlsx.Worksheet {
-            Xlsx.wsName = T.pack "report",
-            Xlsx.wsMinX = 1,
-            Xlsx.wsMaxX = 1 + length ts,
-            Xlsx.wsMinY = 1,
-            Xlsx.wsMaxY = 1 + length allRows,
-            Xlsx.wsColumns = [],
-            Xlsx.wsRowHeights = M.empty,
-            Xlsx.wsCells = cells }
-        cells = M.unions $ zipWith row [1..] allRows
-        row r rowData = M.unions $ zipWith (cell r) [1..] rowData
-        cell r c d = M.singleton (c, r) (fieldValueToCell tz d)
+saveReport :: (MonadLog m, MonadIO m) => FilePath -> [T.Text] -> [[FieldValue]] -> m ()
+saveReport f ts fs = liftIO getCurrentTimeZone >>= saveReport' where
+    saveReport' tz = do
+        log Trace $ T.concat ["Saving report to ", fromString f]
+        liftIO $ Xlsx.writeXlsx f [sheet]
+        where
+            allRows = names : fs
+            names = map (StringValue . T.unpack) ts
+            sheet = Xlsx.Worksheet {
+                Xlsx.wsName = T.pack "report",
+                Xlsx.wsMinX = 1,
+                Xlsx.wsMaxX = 1 + length ts,
+                Xlsx.wsMinY = 1,
+                Xlsx.wsMaxY = 1 + length allRows,
+                Xlsx.wsColumns = [],
+                Xlsx.wsRowHeights = M.empty,
+                Xlsx.wsCells = cells }
+            cells = M.unions $ zipWith row [1..] allRows
+            row r rowData = M.unions $ zipWith (cell r) [1..] rowData
+            cell r c d = M.singleton (c, r) (fieldValueToCell tz d)
 
 createReport :: Syncs -> [ReportFunction] -> [T.Text] -> FilePath -> FilePath -> TIO ()
-createReport ss funs conds from to = do
-    reportDecl <- liftIO $ reportDeclaration from
+createReport ss funs conds from to = scope "createReport" $ do
+    reportDecl <- reportDeclaration from
     fs <- generateReport ss funs reportDecl conds
-    liftIO $ saveReport to (map fst reportDecl) fs
+    saveReport to (map fst reportDecl) fs
 
 fieldValueToCell :: TimeZone -> FieldValue -> Xlsx.CellData
 fieldValueToCell _ (IntValue i) = cell $ Xlsx.CellText $ T.pack $ show i

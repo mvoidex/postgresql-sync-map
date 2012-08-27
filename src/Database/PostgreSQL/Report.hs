@@ -131,7 +131,10 @@ generate r ss funs = scope "Report.generate" $ do
             where
                 q = "select " ++ intercalate ", " fs' ++ " from " ++ intercalate ", " ts ++ condition'
                 
-                rfuns = mconcat $ mapMaybe parseModelField $ concatMap reportFunctionImplicits funs
+                usedFunNames = map reportValueFunction . reportValues $ r
+                usedFuns = filter ((`elem` usedFunNames) . reportFunctionName) funs
+
+                rfuns = mconcat $ mapMaybe parseModelField $ concatMap reportFunctionImplicits usedFuns
                 (Report ms fs vs cs) = r `mappend` rfuns
 
                 -- table names, corresponding to models
