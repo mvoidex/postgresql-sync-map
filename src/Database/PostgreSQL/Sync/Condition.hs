@@ -1,12 +1,15 @@
 module Database.PostgreSQL.Sync.Condition (
 	toWhere, affects,
 	conditionSimple, conditionComplex,
-        condField, syncsField, parseField,
+	FieldName,
+    condField, syncsField, modelsField, splitField, catField, parseField,
+    convertField, convertSyncs, convertModels,
 
 	module Database.PostgreSQL.Sync.Base
 	) where
 
 import Control.Arrow
+import Control.Monad
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as C8
 import Data.List
@@ -56,16 +59,45 @@ conditionComplex ss s args = Condition tables fields' str args where
 	parseField' :: Syncs -> String -> Either (String, String) String
 	parseField' ss' s' = maybe (Right s') Left $ parseField ss' s'
 
-condField :: Sync -> String -> (String, String)
+type FieldName = (String, String)
+
+condField :: Sync -> String -> FieldName
 condField (Sync t h cs) name = case find ((== name) . syncKey) cs of
     (Just (SyncField k c _ _)) -> (t, c)
     Nothing -> (t, h ++ " -> '" ++ T.unpack (escapeHKey (T.pack name)) ++ "'")
 
-syncsField :: Syncs -> String -> String -> Maybe (String, String)
+-- | Convert (model, name) to (table, field) by Syncs
+syncsField :: Syncs -> String -> String -> Maybe FieldName
 syncsField ss model name = fmap (\s -> condField s name) $ M.lookup model (syncsSyncs ss)
 
+-- | Convert (model, name) to (table, field) by Models
+modelsField :: Models -> String -> String -> Maybe FieldName
+modelsField ms model name = fmap (\s -> condField (modelSync s) name) $ M.lookup model (modelsModels ms)
+
+-- | Split model.name to (model, name)
+splitField :: String -> Maybe FieldName
+splitField str = if valid then Just (model, name) else Nothing where
+	valid = all (\c -> isAlpha c || isDigit c || c `elem` "._") str
+	(model, name) = second (drop 1) $ break (== '.') str
+
+-- | Concat (table, field) to table.field
+catField :: FieldName -> String
+catField (model, name) = model ++ "." ++ name
+
 -- | Parse field "model.name" to table-related field "table.column" or "table.garbage -> 'name'"
-parseField :: Syncs -> String -> Maybe (String, String)
+parseField :: Syncs -> String -> Maybe FieldName
 parseField ss mname = if valid then syncsField ss model name else Nothing where
 	(model, name) = second (drop 1) $ break (== '.') mname
 	valid = all (\c -> isAlpha c || isDigit c || c `elem` "._") name
+
+-- | Convert
+convertField :: (a -> FieldName -> Maybe FieldName) -> a -> String -> Maybe String
+convertField f v = splitField >=> f v >=> (return . catField)
+
+-- | Convert by Syncs
+convertSyncs :: Syncs -> String -> Maybe String
+convertSyncs = convertField (\v -> uncurry (syncsField v))
+
+-- | Convert by Models
+convertModels :: Models -> String -> Maybe String
+convertModels = convertField (\v -> uncurry (modelsField v))
