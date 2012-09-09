@@ -2,7 +2,9 @@ module Database.PostgreSQL.Sync.Condition (
 	toWhere, affects,
 	conditionSimple, conditionComplex,
 	FieldName,
-    condField, syncsField, modelsField, splitField, catField, parseField,
+    condField,
+    condSyncField, syncsSyncField, modelsSyncField,
+    syncsField, modelsField, splitField, catField, parseField,
     convertField, convertSyncs, convertModels,
 
 	module Database.PostgreSQL.Sync.Base
@@ -65,6 +67,19 @@ condField :: Sync -> String -> FieldName
 condField (Sync t h cs) name = case find ((== name) . syncKey) cs of
     (Just (SyncField k c _ _)) -> (t, c)
     Nothing -> (t, h ++ " -> '" ++ T.unpack (escapeHKey (T.pack name)) ++ "'")
+
+condSyncField :: Sync -> String -> Maybe SyncField
+condSyncField (Sync t h cs) name = find ((== name) . syncKey) cs
+
+syncsSyncField :: Syncs -> String -> String -> Maybe SyncField
+syncsSyncField ss model name = do
+	s <- M.lookup model (syncsSyncs ss)
+	condSyncField s name
+
+modelsSyncField :: Models -> String -> String -> Maybe SyncField
+modelsSyncField ms model name = do
+	m <- M.lookup model (modelsModels ms)
+	condSyncField (modelSync m) name
 
 -- | Convert (model, name) to (table, field) by Syncs
 syncsField :: Syncs -> String -> String -> Maybe FieldName
