@@ -28,7 +28,7 @@ import Database.PostgreSQL.Sync.Types
 import Database.PostgreSQL.Sync.Condition
 import Database.PostgreSQL.Simple.ToField
 import qualified Data.Map as M
-import System.Log
+import System.Log hiding (constant)
 
 -- | Constant field constaint
 constant :: String -> String -> ModelConstraint

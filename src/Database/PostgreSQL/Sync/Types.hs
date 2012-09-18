@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, OverloadedStrings #-}
 
 module Database.PostgreSQL.Sync.Types (
     SyncMap,
@@ -174,7 +174,16 @@ double = Type DoubleType "double precision" (fmap toField . (tryRead :: ByteStri
 
 -- | Bool type
 bool :: Type
-bool = Type BoolType "boolean" (fmap toField . (tryRead :: ByteString -> Either String (Maybe Bool)))
+bool = Type BoolType "boolean" (fmap toField . tryReadBool) where
+    tryReadBool "" = Right Nothing
+    tryReadBool "null" = Right Nothing
+    tryReadBool "True" = Right (Just True)
+    tryReadBool "False" = Right (Just False)
+    tryReadBool "true" = Right (Just True)
+    tryReadBool "false" = Right (Just False)
+    tryReadBool "1" = Right (Just True)
+    tryReadBool "0" = Right (Just False)
+    tryReadBool bs = Left ("Can't read value: " ++ C8.unpack bs)
 
 -- | String type
 string :: Type
