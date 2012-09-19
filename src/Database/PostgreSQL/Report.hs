@@ -13,7 +13,7 @@ module Database.PostgreSQL.Report (
     ReportCondition(..),
     Report(..),
     ReportValue(..),
-    report, condition,
+    condition, orderBy, report,
     generate,
 
     module Database.PostgreSQL.Report.Function
@@ -57,7 +57,8 @@ data Report = Report {
     reportModels :: [String],
     reportFields :: [ReportField],
     reportValues :: [ReportValue ReportField],
-    reportConditions :: [ReportCondition] }
+    reportConditions :: [ReportCondition],
+    reportOrderBy :: [ReportField] }
         deriving (Eq, Read, Show)
 
 data ReportValue a = ReportValue {
@@ -69,8 +70,8 @@ instance Functor ReportValue where
     fmap f (ReportValue s as) = ReportValue s (fmap (fmap f) as)
 
 instance Monoid Report where
-    mempty = Report [] [] [] []
-    mappend (Report lt lcs lv lc) (Report rt rcs rv rc) = Report (nub $ lt ++ rt) (nub $ lcs ++ rcs) (lv ++ rv) (lc ++ rc)
+    mempty = Report [] [] [] [] []
+    mappend (Report lt lcs lv lc lo) (Report rt rcs rv rc ro) = Report (nub $ lt ++ rt) (nub $ lcs ++ rcs) (lv ++ rv) (lc ++ rc) (lo ++ ro)
 
 parseReportValueNull :: String -> Maybe (ReportValue ReportCondition)
 parseReportValueNull s = parseReportValue s <|> fmap nameToNull (parseReportValue ("ID(" ++ s ++ ")")) where
@@ -100,11 +101,17 @@ parseCondition s = go (s =~ fieldRx) where
 -- | Report without output, only with condition on some field
 condition :: String -> Maybe Report
 condition = fmap toReport . parseCondition where
-    toReport rc@(ReportCondition rf@(ReportField m n) s) = Report [m] [rf] [] [rc]
+    toReport rc@(ReportCondition rf@(ReportField m n) s) = Report [m] [rf] [] [rc] []
+
+orderBy :: String -> Maybe Report
+orderBy s = select $ s =~ fieldRx where
+    select :: (String, String, String, [String]) -> Maybe Report
+    select ("", _, "", [m, n]) = Just $ Report [m] [] [] [] [ReportField m n]
+    select _ = Nothing
 
 report :: String -> Maybe Report
 report = fmap toReport . parseReportValueNull where
-    toReport r = Report models fields [values] (filter (not . noCond) conditions) where
+    toReport r = Report models fields [values] (filter (not . noCond) conditions) [] where
         conditions = rights . reportValueArguments $ r
         fields = nub $ map reportConditionField conditions
         models = nub $ map reportModel fields
@@ -115,7 +122,7 @@ report = fmap toReport . parseReportValueNull where
 parseModelField :: String -> Maybe Report
 parseModelField s = select $ s =~ fieldRx where
     select :: (String, String, String, [String]) -> Maybe Report
-    select ("", _, "", [m, n]) = Just $ Report [m] [ReportField m n] [] []
+    select ("", _, "", [m, n]) = Just $ Report [m] [ReportField m n] [] [] []
     select _ = Nothing
 
 generate :: Report -> Syncs -> [ReportFunction] -> TIO [[FieldValue]]
@@ -129,13 +136,13 @@ generate r ss funs = scope "Report.generate" $ do
             log Trace $ fromString $ "Report conditions: " ++ show (conditionArguments reportRel)
             liftIO $ liftM (map applyFunctions) $ query con (fromString q) (conditionArguments reportRel)
             where
-                q = "select " ++ intercalate ", " fs' ++ " from " ++ intercalate ", " ts ++ condition'
+                q = "select " ++ intercalate ", " fs' ++ " from " ++ intercalate ", " ts ++ condition' ++ orderby'
                 
                 usedFunNames = map reportValueFunction . reportValues $ r
                 usedFuns = filter ((`elem` usedFunNames) . reportFunctionName) funs
 
                 rfuns = mconcat $ mapMaybe parseModelField $ concatMap reportFunctionImplicits usedFuns
-                (Report ms fs vs cs) = r `mappend` rfuns
+                (Report ms fs vs cs os) = r `mappend` rfuns
 
                 -- table names, corresponding to models
                 ts = map (\ mdl -> maybe (error $ "Unknown model name: " ++ show mdl) syncTable $ (M.lookup mdl (syncsSyncs ss))) ms
@@ -146,6 +153,8 @@ generate r ss funs = scope "Report.generate" $ do
                 fs' = map toFieldStr fs
                 -- conditions on fields
                 cs' = map showCondition cs
+                -- orderby fields
+                os' = map toFieldStr os
                 -- condition relations between tables
                 csRels = filter (affects ts) (syncsRelations ss)
                 reportRel = mconcat csRels
@@ -153,6 +162,8 @@ generate r ss funs = scope "Report.generate" $ do
                 allConds = cs' ++ map conditionString csRels
                 -- full condition
                 condition' = if null allConds then "" else " where " ++ intercalate " and " allConds
+                -- orderby
+                orderby' = if null os' then "" else " orderby " ++ intercalate ", " os'
                 -- TODO: Remove parseField and showField
                 showField (ReportField m f) = m ++ "." ++ f
                 showCondition (ReportCondition fld ins) = "(" ++ intercalate (toFieldStr fld) ins ++ ")"

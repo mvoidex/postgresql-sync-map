@@ -62,12 +62,13 @@ reportDeclaration f = do
     log Debug $ T.concat ["Template expressions: ", T.intercalate ", " eTexts]
     return $ zip kTexts eTexts
 
-generateReport :: Syncs -> [ReportFunction] -> [(T.Text, T.Text)] -> [T.Text] -> TIO [[FieldValue]]
-generateReport ss funs m conds = generate rpt ss funs where
+generateReport :: Syncs -> [ReportFunction] -> [(T.Text, T.Text)] -> [T.Text] -> [T.Text] -> TIO [[FieldValue]]
+generateReport ss funs m conds orders = generate rptOrdered ss funs where
     m' = map T.unpack $ map snd m
     flds = map report m'
     additionalConds = map (condition . T.unpack) conds
     rpt = fromMaybe (error $ "Unable to create report: " ++ show m) $ mconcat $ flds ++ additionalConds
+    rptOrdered = rpt `mappend` (mconcat $ mapMaybe (orderBy . T.unpack) orders)
 
 saveReport :: (MonadLog m, MonadIO m) => FilePath -> [T.Text] -> [[FieldValue]] -> m ()
 saveReport f ts fs = liftIO getCurrentTimeZone >>= saveReport' where
@@ -90,10 +91,10 @@ saveReport f ts fs = liftIO getCurrentTimeZone >>= saveReport' where
             row r rowData = M.unions $ zipWith (cell r) [1..] rowData
             cell r c d = M.singleton (c, r) (fieldValueToCell tz d)
 
-createReport :: Syncs -> [ReportFunction] -> [T.Text] -> FilePath -> FilePath -> TIO ()
-createReport ss funs conds from to = scope "createReport" $ do
+createReport :: Syncs -> [ReportFunction] -> [T.Text] -> [T.Text] -> FilePath -> FilePath -> TIO ()
+createReport ss funs conds orders from to = scope "createReport" $ do
     reportDecl <- reportDeclaration from
-    fs <- generateReport ss funs reportDecl conds
+    fs <- generateReport ss funs reportDecl conds orders
     saveReport to (map fst reportDecl) fs
 
 fieldValueToCell :: TimeZone -> FieldValue -> Xlsx.CellData

@@ -287,7 +287,7 @@ run = do
             f <- getLine
             t <- getLine
             c <- getLine >>= readIO
-            withNoLog $ transaction con $ createReport tests (functions dicts) c f t)]
+            withNoLog $ transaction con $ createReport tests (functions dicts) c [] f t)]
     where
         modelIO :: IO String
         modelIO = putStrLn "model:" >> getLine
