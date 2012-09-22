@@ -127,7 +127,7 @@ parseModelField s = select $ s =~ fieldRx where
 
 generate :: Report -> Syncs -> [ReportFunction] -> TIO [[FieldValue]]
 generate r ss funs = scope "Report.generate" $ do
-    log Info "Generating report"
+    log Debug "Generating report"
     con <- connection
     generate' con
     where
