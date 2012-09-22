@@ -163,7 +163,7 @@ generate r ss funs = scope "Report.generate" $ do
                 -- full condition
                 condition' = if null allConds then "" else " where " ++ intercalate " and " allConds
                 -- orderby
-                orderby' = if null os' then "" else " orderby " ++ intercalate ", " os'
+                orderby' = if null os' then "" else " order by " ++ intercalate ", " os'
                 -- TODO: Remove parseField and showField
                 showField (ReportField m f) = m ++ "." ++ f
                 showCondition (ReportCondition fld ins) = "(" ++ intercalate (toFieldStr fld) ins ++ ")"
