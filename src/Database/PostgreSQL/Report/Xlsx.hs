@@ -68,7 +68,8 @@ generateReport ss funs m conds orders = generate rptOrdered ss funs where
     flds = map report m'
     additionalConds = map (condition . T.unpack) conds
     rpt = fromMaybe (error $ "Unable to create report: " ++ show m) $ mconcat $ flds ++ additionalConds
-    rptOrdered = rpt `mappend` (mconcat $ mapMaybe (orderBy . T.unpack) orders)
+    rptOrdered = rpt `mappend` (mconcat . filter inTables . mapMaybe (orderBy . T.unpack) $ orders) where
+        inTables r = not $ null $ intersect (reportModels rpt) (reportModels r)
 
 saveReport :: (MonadLog m, MonadIO m) => FilePath -> [T.Text] -> [[FieldValue]] -> m ()
 saveReport f ts fs = liftIO getCurrentTimeZone >>= saveReport' where
