@@ -25,8 +25,6 @@ import Control.Arrow
 import Control.Applicative
 import Control.Monad
 import Control.Monad.IO.Class
-import Data.ByteString (ByteString)
-import qualified Data.ByteString.Char8 as C8
 import Data.Char
 import Data.Monoid
 import Database.PostgreSQL.Sync
@@ -36,7 +34,6 @@ import Data.List
 import Data.Maybe
 import qualified Data.Map as M
 import Data.String
-import Database.PostgreSQL.Sync.Condition
 import Database.PostgreSQL.Report.Function
 import Text.Regex.Posix
 import System.Log
@@ -78,9 +75,9 @@ parseReportValueNull s = parseReportValue s <|> fmap nameToNull (parseReportValu
     nameToNull rv = rv { reportValueFunction = "" }
 
 parseReportValue :: String -> Maybe (ReportValue ReportCondition)
-parseReportValue = fmap extract . parseRx functionRx where
-    extract (name:(args:_)) = ReportValue name args' where
-        args' = map toArg $ map trim $ split args
+parseReportValue = fmap extract' . parseRx functionRx where
+    extract' (name:(args:_)) = ReportValue name args' where
+        args' = map (toArg . trim) $ split args
         toArg s = case parseCondition s of
             Just v -> Right v
             Nothing -> Left s

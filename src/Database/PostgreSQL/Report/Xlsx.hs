@@ -42,7 +42,7 @@ oneRow f = do
         Xlsx.sheetRowSource x 0 $$
         CL.peek
 
-reportDeclaration :: (MonadLog m, MonadIO m) => FilePath -> m [(T.Text, T.Text)]
+reportDeclaration :: (MonadLog m, MonadIO m) => FilePath -> m ([(T.Text, T.Text)], Maybe T.Text)
 reportDeclaration f = do
     log Trace $ T.concat ["Loading report ", fromString f]
     x <- liftIO $ Xlsx.xlsx f
@@ -60,7 +60,16 @@ reportDeclaration f = do
         eTexts = toTexts e
     log Debug $ T.concat ["Column names: ", T.intercalate ", " kTexts]
     log Debug $ T.concat ["Template expressions: ", T.intercalate ", " eTexts]
-    return $ zip kTexts eTexts
+    let sortAndOrder = fmap removeStar $ find hasStar eTexts
+    return (zip kTexts (map removeStar eTexts), sortAndOrder)
+    where
+        hasStar :: T.Text -> Bool
+        hasStar t = T.head t == '*'
+
+        removeStar :: T.Text -> T.Text
+        removeStar t
+            | hasStar t = T.tail t
+            | otherwise = t
 
 generateReport :: Syncs -> [ReportFunction] -> [(T.Text, T.Text)] -> [T.Text] -> [T.Text] -> TIO [[FieldValue]]
 generateReport ss funs m conds orders = generate rpt' ss funs where
@@ -94,10 +103,16 @@ saveReport f ts fs = liftIO getCurrentTimeZone >>= saveReport' where
             row r rowData = M.unions $ zipWith (cell r) [1..] rowData
             cell r c d = M.singleton (c, r) (fieldValueToCell tz d)
 
-createReport :: Syncs -> [ReportFunction] -> [T.Text] -> [T.Text] -> FilePath -> FilePath -> TIO ()
-createReport ss funs conds orders from to = scope "createReport" $ do
-    reportDecl <- reportDeclaration from
-    fs <- generateReport ss funs reportDecl conds orders
+createReport :: Syncs -> [ReportFunction] -> (T.Text -> [T.Text]) -> [T.Text] -> [T.Text] -> FilePath -> FilePath -> TIO ()
+createReport ss funs superCond conds orders from to = scope "createReport" $ do
+    (reportDecl, sortOrder) <- reportDeclaration from
+    let
+        fieldName = do
+            so <- sortOrder
+            r <- report $ T.unpack so
+            (ReportField m n) <- listToMaybe $ reportFields r
+            return $ T.pack $ m ++ "." ++ n
+    fs <- generateReport ss funs reportDecl (maybe [] superCond fieldName ++ conds) (maybe orders (: orders) fieldName)
     saveReport to (map fst reportDecl) fs
 
 fieldValueToCell :: TimeZone -> FieldValue -> Xlsx.CellData
