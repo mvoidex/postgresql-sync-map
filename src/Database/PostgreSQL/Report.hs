@@ -9,10 +9,6 @@
 -- rs <- transaction con $ generate test reportTemplate
 -- @
 module Database.PostgreSQL.Report (
-    ReportField(..),
-    ReportCondition(..),
-    Report(..),
-    ReportValue(..),
     condition, orderBy, report,
     generate,
 
@@ -37,38 +33,6 @@ import Data.String
 import Database.PostgreSQL.Report.Function
 import Text.Regex.Posix
 import System.Log
-
--- | Report field
-data ReportField = ReportField {
-    reportModel :: String,
-    reportField :: String }
-        deriving (Eq, Ord, Read, Show)
-
-data ReportCondition = ReportCondition {
-    reportConditionField :: ReportField,
-    reportConditionString :: [String] }
-        deriving (Eq, Read, Show)
-
--- | Report template
-data Report = Report {
-    reportModels :: [String],
-    reportFields :: [ReportField],
-    reportValues :: [ReportValue ReportField],
-    reportConditions :: [ReportCondition],
-    reportOrderBy :: [ReportField] }
-        deriving (Eq, Read, Show)
-
-data ReportValue a = ReportValue {
-    reportValueFunction :: String,
-    reportValueArguments :: [Either String a] }
-        deriving (Eq, Read, Show)
-
-instance Functor ReportValue where
-    fmap f (ReportValue s as) = ReportValue s (fmap (fmap f) as)
-
-instance Monoid Report where
-    mempty = Report [] [] [] [] []
-    mappend (Report lt lcs lv lc lo) (Report rt rcs rv rc ro) = Report (nub $ lt ++ rt) (nub $ lcs ++ rcs) (lv ++ rv) (lc ++ rc) (lo ++ ro)
 
 parseReportValueNull :: String -> Maybe (ReportValue ReportCondition)
 parseReportValueNull s = parseReportValue s <|> fmap nameToNull (parseReportValue ("ID(" ++ s ++ ")")) where
@@ -139,7 +103,14 @@ generate r ss funs = scope "Report.generate" $ do
                 usedFuns = filter ((`elem` usedFunNames) . reportFunctionName) funs
 
                 rfuns = mconcat $ mapMaybe parseModelField $ concatMap reportFunctionImplicits usedFuns
-                (Report ms fs vs cs os) = r `mappend` rfuns
+
+                applyMacro (ReportValue fn args) = case find ((== fn) . reportFunctionName) funs of
+                    Nothing -> mempty
+                    Just macrofn -> reportFunctionMacro macrofn args
+
+                macroResults = mconcat $ map applyMacro $ reportValues r
+
+                (Report ms fs vs cs os) = r `mappend` rfuns `mappend` macroResults
 
                 -- table names, corresponding to models
                 ts = map (\ mdl -> maybe (error $ "Unknown model name: " ++ show mdl) syncTable $ (M.lookup mdl (syncsSyncs ss))) ms
